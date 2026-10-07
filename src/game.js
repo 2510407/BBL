@@ -195,55 +195,69 @@
     return junk.length;
   }
 
-  // Cheap procedural field. The FBX field is intentionally disabled for now
-  // because it has no usable texture setup and was covering the players.
-  const grass = new THREE.Mesh(
-    new THREE.PlaneGeometry(150, 150),
-    new THREE.MeshBasicMaterial({ color: 0x2f7d3e })
-  );
-  grass.rotation.x = -Math.PI / 2;
-  grass.position.set(0, -0.012, -35);
-  scene.add(grass);
+  // Actual downloaded baseball field FBX.
+  let fieldLoaded = false;
+  try {
+    const field = parseFBX("field");
+    scaleToSize(field, 120);
+    placeOnGround(field, new THREE.Vector3(0, 0, -38));
+    field.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = false;
+      o.receiveShadow = false;
+      if (o.material) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        mats.forEach((m) => {
+          if (m.map) m.map.encoding = THREE.sRGBEncoding;
+          m.needsUpdate = true;
+        });
+      }
+    });
+    scene.add(field);
+    fieldLoaded = true;
 
-  const dirt = new THREE.Mesh(
-    new THREE.CircleGeometry(24, 48),
-    new THREE.MeshBasicMaterial({ color: 0x9b6845 })
-  );
-  dirt.rotation.x = -Math.PI / 2;
-  dirt.position.set(0, -0.006, -19.3);
-  scene.add(dirt);
-
-  const innerGrass = new THREE.Mesh(
-    new THREE.CircleGeometry(14.5, 48),
-    new THREE.MeshBasicMaterial({ color: 0x3f9148 })
-  );
-  innerGrass.rotation.x = -Math.PI / 2;
-  innerGrass.position.set(0, 0, -19.3);
-  scene.add(innerGrass);
-
-  const mound = new THREE.Mesh(
-    new THREE.CircleGeometry(2.7, 32),
-    new THREE.MeshBasicMaterial({ color: 0xb07b52 })
-  );
-  mound.rotation.x = -Math.PI / 2;
-  mound.position.set(0, 0.006, -18.44);
-  scene.add(mound);
-
-  function makeBase(x, z, rotationY) {
-    const b = new THREE.Mesh(
-      new THREE.BoxGeometry(0.42, 0.055, 0.42),
-      new THREE.MeshBasicMaterial({ color: 0xf4f2e8 })
-    );
-    b.position.set(x, 0.035, z);
-    b.rotation.y = rotationY || Math.PI / 4;
-    scene.add(b);
-    return b;
+    const fb = new THREE.Box3().setFromObject(field);
+    const fs = new THREE.Vector3();
+    fb.getSize(fs);
+    console.log("Field size:", fs.x, fs.y, fs.z);
+  } catch (e) {
+    console.warn("Downloaded field load failed; using fallback field.", e);
   }
 
-  makeBase(0, 0, 0);
-  makeBase(19.4, -19.4);
-  makeBase(0, -38.8);
-  makeBase(-19.4, -19.4);
+  // Only use the cheap generated field when the downloaded FBX fails.
+  if (!fieldLoaded) {
+    const grass = new THREE.Mesh(
+      new THREE.PlaneGeometry(150, 150),
+      new THREE.MeshBasicMaterial({ color: 0x2f7d3e })
+    );
+    grass.rotation.x = -Math.PI / 2;
+    grass.position.set(0, -0.012, -35);
+    scene.add(grass);
+
+    const dirt = new THREE.Mesh(
+      new THREE.CircleGeometry(24, 48),
+      new THREE.MeshBasicMaterial({ color: 0x9b6845 })
+    );
+    dirt.rotation.x = -Math.PI / 2;
+    dirt.position.set(0, -0.006, -19.3);
+    scene.add(dirt);
+
+    const innerGrass = new THREE.Mesh(
+      new THREE.CircleGeometry(14.5, 48),
+      new THREE.MeshBasicMaterial({ color: 0x3f9148 })
+    );
+    innerGrass.rotation.x = -Math.PI / 2;
+    innerGrass.position.set(0, 0, -19.3);
+    scene.add(innerGrass);
+
+    const mound = new THREE.Mesh(
+      new THREE.CircleGeometry(2.7, 32),
+      new THREE.MeshBasicMaterial({ color: 0xb07b52 })
+    );
+    mound.rotation.x = -Math.PI / 2;
+    mound.position.set(0, 0.006, -18.44);
+    scene.add(mound);
+  }
 
   function makePlayer(pos, rotY) {
     const p = parseFBX("player");
