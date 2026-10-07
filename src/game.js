@@ -3,298 +3,497 @@
   const A = window.ASSET_DATA;
   const $ = (id) => document.getElementById(id);
 
+  const RENDER_SCALE = 0.72;
+  const TARGET_FPS = 45;
+  const FRAME_TIME = 1 / TARGET_FPS;
+
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x9ec9e8);
+  scene.background = new THREE.Color(0x87bfe5);
 
-  const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.05, 1000);
-  camera.position.set(0, 2.4, 5.5);
-  camera.lookAt(0, 1.25, -10);
+  const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.05, 400);
+  camera.position.set(0, 2.45, 6.4);
+  camera.lookAt(0, 1.1, -10);
 
-  const renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setSize(innerWidth, innerHeight);
+  const renderer = new THREE.WebGLRenderer({
+    antialias: false,
+    powerPreference: "high-performance"
+  });
   renderer.outputEncoding = THREE.sRGBEncoding;
-  renderer.shadowMap.enabled = true;
+  renderer.setPixelRatio(1);
+  renderer.shadowMap.enabled = false;
   document.body.appendChild(renderer.domElement);
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x415163, 1.35));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.25);
+  function resizeRenderer() {
+    const w = innerWidth;
+    const h = innerHeight;
+    renderer.setSize(
+      Math.max(320, Math.floor(w * RENDER_SCALE)),
+      Math.max(220, Math.floor(h * RENDER_SCALE)),
+      false
+    );
+    renderer.domElement.style.width = w + "px";
+    renderer.domElement.style.height = h + "px";
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  resizeRenderer();
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x31502c, 1.55));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.8);
   sun.position.set(10, 18, 8);
-  sun.castShadow = true;
   scene.add(sun);
 
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 1, -7);
+  controls.target.set(0, 1.0, -9);
   controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 3.5;
+  controls.maxDistance = 45;
 
   const loader = new THREE.FBXLoader();
   const textureLoader = new THREE.TextureLoader();
   const clock = new THREE.Clock();
 
   const state = {
-    batter:null, pitcher:null, bat:null, glove:null, ball:null,
-    batterMixer:null, pitcherMixer:null,
-    batterIdle:null, pitcherIdle:null, swingAction:null, pitchAction:null,
-    pitching:false, pitchT:0, swingWindow:0, hit:false,
-    ballVelocity:new THREE.Vector3(), ballAirborne:false,
-    pitchStart:new THREE.Vector3(0, 1.72, -18.44),
-    pitchEnd:new THREE.Vector3(0, 1.02, 0.05),
+    batter: null,
+    pitcher: null,
+    bat: null,
+    glove: null,
+    ball: null,
+    batterMixer: null,
+    pitcherMixer: null,
+    batterIdle: null,
+    pitcherIdle: null,
+    swingAction: null,
+    pitchAction: null,
+    pitching: false,
+    pitchT: 0,
+    swingWindow: 0,
+    hit: false,
+    ballVelocity: new THREE.Vector3(),
+    ballAirborne: false,
+    pitchStart: new THREE.Vector3(0, 1.68, -17.75),
+    pitchEnd: new THREE.Vector3(0.12, 0.98, 0.05),
+    fpsFrames: 0,
+    fpsTime: 0
   };
 
-  function b64ToBuffer(b64){
-    const raw = atob(b64), a = new Uint8Array(raw.length);
-    for(let i=0;i<raw.length;i++) a[i] = raw.charCodeAt(i);
+  function b64ToBuffer(b64) {
+    const raw = atob(b64);
+    const a = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) a[i] = raw.charCodeAt(i);
     return a.buffer;
   }
-  function parseFBX(key){
-    if(!A[key]) throw new Error("missing asset: " + key);
+
+  function parseFBX(key) {
+    if (!A[key]) throw new Error("missing asset: " + key);
     return loader.parse(b64ToBuffer(A[key]), "");
   }
-  function scaleToHeight(obj, h){
+
+  function scaleToHeight(obj, height) {
+    obj.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(obj);
-    const size = new THREE.Vector3(); box.getSize(size);
-    if(size.y > 0){
-      const s = h/size.y;
-      obj.scale.multiplyScalar(s);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    if (size.y > 0.0001) {
+      obj.scale.multiplyScalar(height / size.y);
+      obj.updateMatrixWorld(true);
     }
   }
-  function scaleToSize(obj, maxSize){
+
+  function scaleToSize(obj, maxSize) {
+    obj.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(obj);
-    const size = new THREE.Vector3(); box.getSize(size);
-    const m = Math.max(size.x,size.y,size.z);
-    if(m > 0) obj.scale.multiplyScalar(maxSize/m);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const m = Math.max(size.x, size.y, size.z);
+    if (m > 0.0001) {
+      obj.scale.multiplyScalar(maxSize / m);
+      obj.updateMatrixWorld(true);
+    }
   }
-  function groundObject(obj){
+
+  function placeOnGround(obj, pos) {
+    obj.position.set(pos.x, 0, pos.z);
+    obj.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(obj);
-    obj.position.y -= box.min.y;
+    obj.position.y += pos.y - box.min.y;
+    obj.updateMatrixWorld(true);
   }
-  function firstClip(key){
-    try{
+
+  function firstClip(key) {
+    try {
       const f = parseFBX(key);
-      return (f.animations && f.animations[0]) ? f.animations[0] : null;
-    }catch(e){ console.warn(e); return null; }
+      return f.animations && f.animations[0] ? f.animations[0] : null;
+    } catch (e) {
+      console.warn(e);
+      return null;
+    }
   }
-  function findBone(obj, words){
-    let found=null;
-    obj.traverse(o=>{
-      if(found || !o.isBone) return;
-      const n=(o.name||"").toLowerCase().replace(/[^a-z]/g,"");
-      if(words.every(w=>n.includes(w))) found=o;
+
+  function findBone(obj, token) {
+    const target = token.toLowerCase().replace(/[^a-z]/g, "");
+    let found = null;
+    obj.traverse((o) => {
+      if (found || !o.isBone) return;
+      const n = (o.name || "").toLowerCase().replace(/[^a-z]/g, "");
+      if (n.includes(target)) found = o;
     });
     return found;
   }
-  function attachProp(prop, actor, handWords, scale=1){
-    const hand = findBone(actor, handWords);
-    if(!hand){ actor.add(prop); prop.position.set(0,1,0); return; }
-    hand.add(prop);
-    prop.position.set(0,0,0);
-    prop.rotation.set(0,0,0);
-    prop.scale.multiplyScalar(scale);
+
+  function attachProp(prop, actor, boneName) {
+    const bone = findBone(actor, boneName);
+    if (!bone) {
+      console.warn("bone not found:", boneName);
+      return false;
+    }
+    bone.add(prop);
+    prop.position.set(0, 0, 0);
+    prop.rotation.set(0, 0, 0);
+    return true;
   }
-  function setStatus(t){ $("status").textContent=t; }
 
-  // fallback floor
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(140,140),
-    new THREE.MeshStandardMaterial({color:0x4d8d47, roughness:1})
+  function setStatus(t) {
+    $("status").textContent = t;
+  }
+
+  // Cheap procedural field. The FBX field is intentionally disabled for now
+  // because it has no usable texture setup and was covering the players.
+  const grass = new THREE.Mesh(
+    new THREE.PlaneGeometry(150, 150),
+    new THREE.MeshLambertMaterial({ color: 0x3d8244 })
   );
-  floor.rotation.x = -Math.PI/2;
-  floor.position.y = -0.01;
-  floor.receiveShadow = true;
-  scene.add(floor);
+  grass.rotation.x = -Math.PI / 2;
+  grass.position.set(0, -0.012, -35);
+  scene.add(grass);
 
-  // Field
-  try{
-    const field = parseFBX("field");
-    scaleToSize(field, 120);
-    groundObject(field);
-    field.position.set(0,0,-38);
-    field.traverse(o=>{ if(o.isMesh){o.receiveShadow=true; o.castShadow=true;} });
-    scene.add(field);
-  }catch(e){ console.warn("Field load failed",e); }
+  const dirt = new THREE.Mesh(
+    new THREE.CircleGeometry(24, 48),
+    new THREE.MeshLambertMaterial({ color: 0xa9784f })
+  );
+  dirt.rotation.x = -Math.PI / 2;
+  dirt.position.set(0, -0.006, -19.3);
+  scene.add(dirt);
 
-  function makePlayer(pos, rotY){
+  const innerGrass = new THREE.Mesh(
+    new THREE.CircleGeometry(14.5, 48),
+    new THREE.MeshLambertMaterial({ color: 0x438b48 })
+  );
+  innerGrass.rotation.x = -Math.PI / 2;
+  innerGrass.position.set(0, 0, -19.3);
+  scene.add(innerGrass);
+
+  const mound = new THREE.Mesh(
+    new THREE.CircleGeometry(2.7, 32),
+    new THREE.MeshLambertMaterial({ color: 0xb38359 })
+  );
+  mound.rotation.x = -Math.PI / 2;
+  mound.position.set(0, 0.006, -18.44);
+  scene.add(mound);
+
+  function makeBase(x, z, rotationY) {
+    const b = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, 0.055, 0.42),
+      new THREE.MeshLambertMaterial({ color: 0xf4f2e8 })
+    );
+    b.position.set(x, 0.035, z);
+    b.rotation.y = rotationY || Math.PI / 4;
+    scene.add(b);
+    return b;
+  }
+
+  makeBase(0, 0, 0);
+  makeBase(19.4, -19.4);
+  makeBase(0, -38.8);
+  makeBase(-19.4, -19.4);
+
+  function makePlayer(pos, rotY) {
     const p = parseFBX("player");
     scaleToHeight(p, 1.84);
-    groundObject(p);
-    p.position.copy(pos);
     p.rotation.y = rotY;
-    p.traverse(o=>{ if(o.isMesh){o.castShadow=true; o.receiveShadow=true;} });
+    placeOnGround(p, pos);
+    p.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = false;
+        o.receiveShadow = false;
+        if (o.material) {
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          mats.forEach((m) => {
+            if (m.map) m.map.encoding = THREE.sRGBEncoding;
+            m.needsUpdate = true;
+          });
+        }
+      }
+    });
     scene.add(p);
     return p;
   }
 
-  state.batter = makePlayer(new THREE.Vector3(0.75,0,0.2), Math.PI);
-  state.pitcher = makePlayer(new THREE.Vector3(0,0,-18.44), 0);
+  try {
+    state.batter = makePlayer(new THREE.Vector3(0.82, 0, 0.38), Math.PI);
+    state.pitcher = makePlayer(new THREE.Vector3(0, 0, -18.44), 0);
+  } catch (e) {
+    console.error("player load failed", e);
+    setStatus("선수 로드 실패: " + e.message);
+    return;
+  }
 
   state.batterMixer = new THREE.AnimationMixer(state.batter);
   state.pitcherMixer = new THREE.AnimationMixer(state.pitcher);
 
-  const idleR = firstClip("idleRight");
-  const fielderIdle = firstClip("fielderIdle");
+  const batterIdleClip =
+    state.batter.animations && state.batter.animations[0]
+      ? state.batter.animations[0]
+      : null;
+  const pitcherIdleClip = firstClip("fielderIdle");
   const hitR = firstClip("hitRight");
   const pitchR = firstClip("pitchRight");
 
-  if(idleR){
-    state.batterIdle = state.batterMixer.clipAction(idleR);
+  if (batterIdleClip) {
+    state.batterIdle = state.batterMixer.clipAction(batterIdleClip);
     state.batterIdle.play();
   }
-  if(fielderIdle){
-    state.pitcherIdle = state.pitcherMixer.clipAction(fielderIdle);
+
+  if (pitcherIdleClip) {
+    state.pitcherIdle = state.pitcherMixer.clipAction(pitcherIdleClip);
+    state.pitcherIdle.play();
+  } else if (state.pitcher.animations && state.pitcher.animations[0]) {
+    state.pitcherIdle = state.pitcherMixer.clipAction(state.pitcher.animations[0]);
     state.pitcherIdle.play();
   }
-  if(hitR){
+
+  if (hitR) {
     state.swingAction = state.batterMixer.clipAction(hitR);
-    state.swingAction.setLoop(THREE.LoopOnce,1);
-    state.swingAction.clampWhenFinished=true;
+    state.swingAction.setLoop(THREE.LoopOnce, 1);
+    state.swingAction.clampWhenFinished = true;
   }
-  if(pitchR){
+
+  if (pitchR) {
     state.pitchAction = state.pitcherMixer.clipAction(pitchR);
-    state.pitchAction.setLoop(THREE.LoopOnce,1);
-    state.pitchAction.clampWhenFinished=true;
+    state.pitchAction.setLoop(THREE.LoopOnce, 1);
+    state.pitchAction.clampWhenFinished = true;
+  }
+
+  function playOnce(action, idleAction) {
+    if (!action) return;
+    if (idleAction) idleAction.fadeOut(0.06);
+    action.reset();
+    action.setEffectiveWeight(1);
+    action.fadeIn(0.05);
+    action.play();
+
+    const ms = Math.max(120, action.getClip().duration * 1000 - 70);
+    setTimeout(() => {
+      action.fadeOut(0.07);
+      if (idleAction) {
+        idleAction.reset();
+        idleAction.fadeIn(0.1);
+        idleAction.play();
+      }
+    }, ms);
   }
 
   // Bat
-  try{
+  try {
     state.bat = parseFBX("bat");
-    scaleToSize(state.bat, 1.0);
-    state.bat.traverse(o=>{
-      if(!o.isMesh) return;
-      const albedo = A.batAlbedo ? textureLoader.load("data:image/png;base64,"+A.batAlbedo) : null;
-      const normal = A.batNormal ? textureLoader.load("data:image/png;base64,"+A.batNormal) : null;
-      const metal = A.batMetalness ? textureLoader.load("data:image/png;base64,"+A.batMetalness) : null;
-      const rough = A.batRoughness ? textureLoader.load("data:image/png;base64,"+A.batRoughness) : null;
-      const mat = new THREE.MeshStandardMaterial({map:albedo, normalMap:normal, metalnessMap:metal, roughnessMap:rough});
-      o.material=mat; o.castShadow=true;
+    scaleToSize(state.bat, 0.94);
+
+    const albedo = A.batAlbedo
+      ? textureLoader.load("data:image/png;base64," + A.batAlbedo)
+      : null;
+    const normal = A.batNormal
+      ? textureLoader.load("data:image/png;base64," + A.batNormal)
+      : null;
+    const metal = A.batMetalness
+      ? textureLoader.load("data:image/png;base64," + A.batMetalness)
+      : null;
+    const rough = A.batRoughness
+      ? textureLoader.load("data:image/png;base64," + A.batRoughness)
+      : null;
+
+    if (albedo) albedo.encoding = THREE.sRGBEncoding;
+
+    state.bat.traverse((o) => {
+      if (!o.isMesh) return;
+      o.material = new THREE.MeshStandardMaterial({
+        map: albedo,
+        normalMap: normal,
+        metalnessMap: metal,
+        roughnessMap: rough,
+        metalness: metal ? 1 : 0.05,
+        roughness: rough ? 1 : 0.45
+      });
     });
-    attachProp(state.bat, state.batter, ["righthand"], 0.9);
-    state.bat.rotation.set(0, Math.PI/2, Math.PI/2);
-    state.bat.position.set(0.05,0.02,0);
-  }catch(e){ console.warn("Bat load failed",e); }
+
+    if (attachProp(state.bat, state.batter, "RightHand")) {
+      state.bat.rotation.set(0.05, Math.PI / 2, Math.PI / 2);
+      state.bat.position.set(0.03, 0.01, 0);
+    }
+  } catch (e) {
+    console.warn("bat load failed", e);
+  }
 
   // Glove
-  try{
+  try {
     state.glove = parseFBX("glove");
-    scaleToSize(state.glove, 0.32);
-    attachProp(state.glove, state.pitcher, ["lefthand"], 1);
-    state.glove.rotation.set(0,0,0);
-    state.glove.position.set(0,0,0);
-  }catch(e){ console.warn("Glove load failed",e); }
-
-  // Ball
-  try{
-    state.ball = parseFBX("ball");
-    scaleToSize(state.ball, 0.074);
-  }catch(e){
-    state.ball = new THREE.Mesh(new THREE.SphereGeometry(0.037,20,20), new THREE.MeshStandardMaterial({color:0xffffff}));
+    scaleToSize(state.glove, 0.30);
+    if (attachProp(state.glove, state.pitcher, "LeftHand")) {
+      state.glove.position.set(0, 0, 0);
+      state.glove.rotation.set(0, 0, 0);
+    }
+  } catch (e) {
+    console.warn("glove load failed", e);
   }
-  state.ball.traverse(o=>{if(o.isMesh)o.castShadow=true;});
-  scene.add(state.ball);
-  state.ball.position.copy(state.pitchStart);
 
-  function resetBall(){
-    state.pitching=false; state.hit=false; state.ballAirborne=false;
-    state.pitchT=0; state.swingWindow=0;
-    state.ballVelocity.set(0,0,0);
+  // Lightweight ball for prototype. The detailed FBX ball stays in the repo
+  // and can be re-enabled after the core gameplay is stable.
+  state.ball = new THREE.Mesh(
+    new THREE.SphereGeometry(0.037, 12, 8),
+    new THREE.MeshStandardMaterial({ color: 0xf4f2e9, roughness: 0.75 })
+  );
+  scene.add(state.ball);
+
+  function resetBall() {
+    state.pitching = false;
+    state.hit = false;
+    state.ballAirborne = false;
+    state.pitchT = 0;
+    state.swingWindow = 0;
+    state.ballVelocity.set(0, 0, 0);
     state.ball.position.copy(state.pitchStart);
   }
 
-  function pitch(){
-    if(state.pitching || state.ballAirborne) return;
-    state.pitching=true; state.pitchT=0; state.hit=false;
-    if(state.pitchAction){
-      state.pitchAction.reset().fadeIn(0.05).play();
-    }
+  function pitch() {
+    if (state.pitching || state.ballAirborne) return;
+    state.pitching = true;
+    state.pitchT = 0;
+    state.hit = false;
+    playOnce(state.pitchAction, state.pitcherIdle);
     setStatus("PITCH");
   }
 
-  function swing(){
-    state.swingWindow=0.28;
-    if(state.swingAction){
-      state.swingAction.reset().fadeIn(0.03).play();
-    }
+  function swing() {
+    state.swingWindow = 0.23;
+    playOnce(state.swingAction, state.batterIdle);
     setStatus("SWING");
   }
 
-  function hitBall(){
-    state.hit=true; state.pitching=false; state.ballAirborne=true;
-    // Toward center field (-Z), slightly randomized horizontal direction.
-    const side = (Math.random()-0.5)*5.5;
-    state.ballVelocity.set(side, 8.5 + Math.random()*3.0, -31 - Math.random()*8);
+  function hitBall() {
+    state.hit = true;
+    state.pitching = false;
+    state.ballAirborne = true;
+    const side = (Math.random() - 0.5) * 7;
+    state.ballVelocity.set(
+      side,
+      8.2 + Math.random() * 3.8,
+      -31 - Math.random() * 9
+    );
     setStatus("CONTACT!");
   }
 
-  function updateBall(dt){
-    if(state.pitching){
+  function updateBall(dt) {
+    if (state.pitching) {
       state.pitchT += dt;
-      // release delay + ~0.62 sec travel
-      const releaseDelay=0.28, travel=0.62;
-      if(state.pitchT < releaseDelay){
+      const releaseDelay = 0.24;
+      const travel = 0.49;
+
+      if (state.pitchT < releaseDelay) {
         state.ball.position.copy(state.pitchStart);
         return;
       }
-      let t=(state.pitchT-releaseDelay)/travel;
-      t=Math.min(Math.max(t,0),1);
 
-      // Simple fastball with slight drop
-      state.ball.position.lerpVectors(state.pitchStart,state.pitchEnd,t);
-      state.ball.position.y += 0.22*Math.sin(Math.PI*t) - 0.18*t*t;
+      let t = (state.pitchT - releaseDelay) / travel;
+      t = Math.min(Math.max(t, 0), 1);
 
-      if(state.swingWindow>0 && !state.hit && t>0.78 && t<1.03){
-        // prototype contact window
-        const dx=Math.abs(state.ball.position.x-0.25);
-        const dy=Math.abs(state.ball.position.y-1.02);
-        if(dx<0.6 && dy<0.65) hitBall();
+      state.ball.position.lerpVectors(state.pitchStart, state.pitchEnd, t);
+      state.ball.position.y += 0.13 * Math.sin(Math.PI * t) - 0.16 * t * t;
+
+      if (state.swingWindow > 0 && !state.hit && t > 0.78 && t < 1.01) {
+        const dx = Math.abs(state.ball.position.x - 0.18);
+        const dy = Math.abs(state.ball.position.y - 0.98);
+        if (dx < 0.55 && dy < 0.55) hitBall();
       }
 
-      if(t>=1 && !state.hit){
-        state.pitching=false;
+      if (t >= 1 && !state.hit) {
+        state.pitching = false;
         setStatus("MISS / TAKE");
-        setTimeout(resetBall,700);
+        setTimeout(resetBall, 600);
       }
-    } else if(state.ballAirborne){
-      state.ballVelocity.y -= 9.81*dt;
-      state.ball.position.addScaledVector(state.ballVelocity,dt);
-      if(state.ball.position.y<=0.037){
-        state.ball.position.y=0.037;
-        state.ballVelocity.y *= -0.34;
-        state.ballVelocity.x *= 0.82;
-        state.ballVelocity.z *= 0.82;
-        if(state.ballVelocity.length()<2.2){
-          state.ballAirborne=false;
+    } else if (state.ballAirborne) {
+      state.ballVelocity.y -= 9.81 * dt;
+      state.ball.position.addScaledVector(state.ballVelocity, dt);
+
+      if (state.ball.position.y <= 0.037) {
+        state.ball.position.y = 0.037;
+        state.ballVelocity.y *= -0.32;
+        state.ballVelocity.x *= 0.83;
+        state.ballVelocity.z *= 0.83;
+
+        if (state.ballVelocity.length() < 2.0) {
+          state.ballAirborne = false;
           setStatus("BALL IN PLAY");
-          setTimeout(resetBall,1100);
+          setTimeout(resetBall, 900);
         }
       }
     }
   }
 
-  $("pitchBtn").onclick=pitch;
-  $("swingBtn").onclick=swing;
-  $("resetBtn").onclick=resetBall;
-  addEventListener("keydown",e=>{
-    if(e.code==="KeyP") pitch();
-    if(e.code==="Space" || e.code==="KeyS"){ e.preventDefault(); swing(); }
-    if(e.code==="KeyR") resetBall();
+  $("pitchBtn").onclick = pitch;
+  $("swingBtn").onclick = swing;
+  $("resetBtn").onclick = resetBall;
+
+  addEventListener("keydown", (e) => {
+    if (e.code === "KeyP") pitch();
+    if (e.code === "Space" || e.code === "KeyS") {
+      e.preventDefault();
+      swing();
+    }
+    if (e.code === "KeyR") resetBall();
   });
 
-  function tick(){
+  const perf = document.createElement("div");
+  perf.style.fontSize = "11px";
+  perf.style.opacity = "0.7";
+  perf.style.marginTop = "5px";
+  perf.textContent = "성능 모드";
+  document.getElementById("hud").appendChild(perf);
+
+  let accumulator = 0;
+
+  function tick() {
     requestAnimationFrame(tick);
-    const dt=Math.min(clock.getDelta(),0.033);
-    if(state.swingWindow>0) state.swingWindow-=dt;
-    if(state.batterMixer) state.batterMixer.update(dt);
-    if(state.pitcherMixer) state.pitcherMixer.update(dt);
+
+    let dt = Math.min(clock.getDelta(), 0.1);
+    accumulator += dt;
+    state.fpsTime += dt;
+
+    if (accumulator < FRAME_TIME) return;
+    dt = Math.min(accumulator, 0.05);
+    accumulator = 0;
+
+    if (state.swingWindow > 0) state.swingWindow -= dt;
+    if (state.batterMixer) state.batterMixer.update(dt);
+    if (state.pitcherMixer) state.pitcherMixer.update(dt);
     updateBall(dt);
+
     controls.update();
-    renderer.render(scene,camera);
+    renderer.render(scene, camera);
+
+    state.fpsFrames++;
+    if (state.fpsTime >= 1) {
+      perf.textContent =
+        "성능 모드 · " +
+        Math.round(state.fpsFrames / state.fpsTime) +
+        " FPS";
+      state.fpsFrames = 0;
+      state.fpsTime = 0;
+    }
   }
+
   resetBall();
   setStatus("P = 투구 / Space = 스윙");
   tick();
 
-  addEventListener("resize",()=>{
-    camera.aspect=innerWidth/innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth,innerHeight);
-  });
+  addEventListener("resize", resizeRenderer);
 })();
