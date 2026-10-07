@@ -77,7 +77,10 @@
     pitchStart: new THREE.Vector3(0, 1.68, -17.75),
     pitchEnd: new THREE.Vector3(0.12, 0.98, 0.05),
     fpsFrames: 0,
-    fpsTime: 0
+    fpsTime: 0,
+    fieldAnchors: null,
+    batterStart: new THREE.Vector3(0.9, 0, 0),
+    pitcherStart: new THREE.Vector3(0, 0, -18.44)
   };
 
   function b64ToBuffer(b64) {
@@ -197,12 +200,167 @@
     return junk.length;
   }
 
+
+  function findNamedMesh(root, token) {
+    const q = token.toLowerCase();
+    let found = null;
+    root.traverse((o) => {
+      if (found || !o.isMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
+      const own = (o.name || "").toLowerCase();
+      const parent = (o.parent && o.parent.name ? o.parent.name : "").toLowerCase();
+      if (own.includes(q) || parent.includes(q)) found = o;
+    });
+    return found;
+  }
+
+  function kMeansFourCenters(mesh) {
+    const attr = mesh.geometry.attributes.position;
+    if (!attr || attr.count < 4) return null;
+
+    const pts = [];
+    for (let i = 0; i < attr.count; i++) {
+      pts.push(new THREE.Vector3(attr.getX(i), attr.getY(i), attr.getZ(i)));
+    }
+
+    // Farthest-point initialization makes the four disconnected bases
+    // separate cleanly even when FBX duplicates vertices.
+    const centers = [pts[0].clone()];
+    while (centers.length < 4) {
+      let best = pts[0], bestD = -1;
+      for (const p of pts) {
+        let d = Infinity;
+        for (const cen of centers) d = Math.min(d, p.distanceToSquared(cen));
+        if (d > bestD) { bestD = d; best = p; }
+      }
+      centers.push(best.clone());
+    }
+
+    for (let iter = 0; iter < 12; iter++) {
+      const sums = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+      const counts = [0,0,0,0];
+
+      for (const p of pts) {
+        let bi = 0, bd = Infinity;
+        for (let i = 0; i < 4; i++) {
+          const d = p.distanceToSquared(centers[i]);
+          if (d < bd) { bd = d; bi = i; }
+        }
+        sums[bi].add(p);
+        counts[bi]++;
+      }
+
+      for (let i = 0; i < 4; i++) {
+        if (counts[i]) centers[i].copy(sums[i].multiplyScalar(1 / counts[i]));
+      }
+    }
+    return centers;
+  }
+
+  function readBaseAnchors(field) {
+    const bases = findNamedMesh(field, "bases");
+    if (!bases) return null;
+
+    const localCenters = kMeansFourCenters(bases);
+    if (!localCenters) return null;
+
+    // In this downloaded model Home is the base cluster nearest geometry origin.
+    let homeIdx = 0;
+    let homeLen = Infinity;
+    for (let i = 0; i < localCenters.length; i++) {
+      const d = localCenters[i].lengthSq();
+      if (d < homeLen) { homeLen = d; homeIdx = i; }
+    }
+
+    const world = localCenters.map((p) => bases.localToWorld(p.clone()));
+    const home = world[homeIdx];
+
+    let secondIdx = -1, far = -1;
+    for (let i = 0; i < world.length; i++) {
+      if (i === homeIdx) continue;
+      const d = world[i].distanceToSquared(home);
+      if (d > far) { far = d; secondIdx = i; }
+    }
+
+    const sides = world.filter((_, i) => i !== homeIdx && i !== secondIdx);
+    return { home, second: world[secondIdx], sides };
+  }
+
+  function calibrateFieldFromBases(field) {
+    scene.add(field);
+    field.updateMatrixWorld(true);
+
+    let a = readBaseAnchors(field);
+    if (!a) {
+      console.warn("Base anchors not found; using fallback placement.");
+      scaleToSize(field, 120);
+      placeOnGround(field, new THREE.Vector3(0, 0, -38));
+      return null;
+    }
+
+    // Home-to-second is 127 ft 3 3/8 in = about 38.795 m.
+    const REAL_HOME_TO_SECOND = 38.795;
+    const rawDist = a.home.distanceTo(a.second);
+    if (rawDist > 0.001) {
+      field.scale.multiplyScalar(REAL_HOME_TO_SECOND / rawDist);
+      field.updateMatrixWorld(true);
+    }
+
+    a = readBaseAnchors(field);
+
+    // Rotate so Home -> 2B points straight toward -Z.
+    const dir = a.second.clone().sub(a.home);
+    const currentAngle = Math.atan2(dir.x, dir.z);
+    field.rotation.y += Math.PI - currentAngle;
+    field.updateMatrixWorld(true);
+
+    a = readBaseAnchors(field);
+
+    // Put home plate at world origin.
+    field.position.x -= a.home.x;
+    field.position.y -= a.home.y;
+    field.position.z -= a.home.z;
+    field.updateMatrixWorld(true);
+
+    a = readBaseAnchors(field);
+
+    const forward = a.second.clone().sub(a.home);
+    forward.y = 0;
+    forward.normalize();
+
+    // Sort side bases after orientation: +X = first-base side, -X = third-base side.
+    const sideSorted = a.sides.slice().sort((p, q) => q.x - p.x);
+    const first = sideSorted[0];
+    const third = sideSorted[1];
+
+    const thirdDir = third.clone().sub(a.home);
+    thirdDir.y = 0;
+    thirdDir.normalize();
+
+    // Pitching rubber/mound center: 60 ft 6 in = 18.44 m from home.
+    state.pitcherStart.copy(a.home).addScaledVector(forward, 18.44);
+    state.pitcherStart.y = 0;
+
+    // Right-handed batter stands on the third-base side of home.
+    state.batterStart.copy(a.home)
+      .addScaledVector(thirdDir, 0.92)
+      .addScaledVector(forward, -0.12);
+    state.batterStart.y = 0;
+
+    state.pitchStart.copy(state.pitcherStart);
+    state.pitchStart.y += 1.68;
+    state.pitchEnd.copy(a.home);
+    state.pitchEnd.y = 1.00;
+
+    state.fieldAnchors = { home: a.home, second: a.second, first, third, forward };
+    console.log("Field calibrated", state.fieldAnchors);
+    return state.fieldAnchors;
+  }
+
   // Actual downloaded baseball field FBX.
   let fieldLoaded = false;
   try {
     const field = parseFBX("field");
-    scaleToSize(field, 120);
-    placeOnGround(field, new THREE.Vector3(0, 0, -38));
+    calibrateFieldFromBases(field);
     field.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = false;
@@ -258,7 +416,7 @@
         o.material = fixFieldMaterial(o.material);
       }
     });
-    scene.add(field);
+    if (!field.parent) scene.add(field);
     fieldLoaded = true;
 
     const fb = new THREE.Box3().setFromObject(field);
@@ -304,6 +462,14 @@
     scene.add(mound);
   }
 
+
+  function setGameplayCamera() {
+    camera.position.set(0, 2.35, 5.8);
+    controls.target.set(0, 1.15, -13.0);
+    camera.lookAt(controls.target);
+    controls.update();
+  }
+
   function makePlayer(pos, rotY) {
     const p = parseFBX("player");
     const removedJunk = stripOversizedFlatMeshes(p);
@@ -346,13 +512,15 @@
   }
 
   try {
-    state.batter = makePlayer(new THREE.Vector3(0.86, 0, -0.05), Math.PI);
-    state.pitcher = makePlayer(new THREE.Vector3(0, 0, -18.44), 0);
+    state.batter = makePlayer(state.batterStart.clone(), Math.PI);
+    state.pitcher = makePlayer(state.pitcherStart.clone(), 0);
   } catch (e) {
     console.error("player load failed", e);
     setStatus("선수 로드 실패: " + e.message);
     return;
   }
+
+  setGameplayCamera();
 
   state.batterMixer = new THREE.AnimationMixer(state.batter);
   state.pitcherMixer = new THREE.AnimationMixer(state.pitcher);
