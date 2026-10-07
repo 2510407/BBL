@@ -1,6 +1,6 @@
 {
   "models": {
-    "player": "models/BaseballPlayer.fbx",
+    "player": "animations/Baseball Idle right.fbx",
     "field": "models/Baseball Field.fbx",
     "ball": "models/baseball.fbx",
     "bat": "models/baseball_bat.fbx",
