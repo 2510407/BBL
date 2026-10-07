@@ -11,8 +11,8 @@
   scene.background = new THREE.Color(0x87bfe5);
 
   const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.05, 400);
-  camera.position.set(0, 2.45, 6.4);
-  camera.lookAt(0, 1.1, -10);
+  camera.position.set(-0.35, 1.95, 5.0);
+  camera.lookAt(0, 1.05, -13.5);
 
   const renderer = new THREE.WebGLRenderer({
     antialias: false,
@@ -44,7 +44,7 @@
   scene.add(sun);
 
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 1.0, -9);
+  controls.target.set(0, 1.05, -13.5);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.minDistance = 3.5;
@@ -158,11 +158,48 @@
     $("status").textContent = t;
   }
 
+  function stripOversizedFlatMeshes(obj) {
+    // Mixamo 원본 캐릭터에 같이 딸려온 거대한 바닥/배경 메쉬 제거.
+    // 사람 몸 높이에 비해 X/Z만 비정상적으로 넓고 Y가 얇은 메쉬만 숨긴다.
+    obj.updateMatrixWorld(true);
+
+    const full = new THREE.Box3().setFromObject(obj);
+    const fullSize = new THREE.Vector3();
+    full.getSize(fullSize);
+    const bodyH = Math.max(fullSize.y, 0.001);
+
+    const junk = [];
+
+    obj.traverse((o) => {
+      if (!o.isMesh || !o.geometry) return;
+
+      const b = new THREE.Box3().setFromObject(o);
+      const s = new THREE.Vector3();
+      b.getSize(s);
+
+      const flatAndHuge =
+        (s.x > bodyH * 2.15 || s.z > bodyH * 2.15) &&
+        s.y < bodyH * 0.42;
+
+      const suspiciousName = /plane|ground|floor|background|backdrop/i.test(o.name || "");
+
+      if (flatAndHuge || suspiciousName) {
+        junk.push(o);
+      }
+    });
+
+    junk.forEach((o) => {
+      o.visible = false;
+    });
+
+    return junk.length;
+  }
+
   // Cheap procedural field. The FBX field is intentionally disabled for now
   // because it has no usable texture setup and was covering the players.
   const grass = new THREE.Mesh(
     new THREE.PlaneGeometry(150, 150),
-    new THREE.MeshLambertMaterial({ color: 0x3d8244 })
+    new THREE.MeshBasicMaterial({ color: 0x2f7d3e })
   );
   grass.rotation.x = -Math.PI / 2;
   grass.position.set(0, -0.012, -35);
@@ -170,7 +207,7 @@
 
   const dirt = new THREE.Mesh(
     new THREE.CircleGeometry(24, 48),
-    new THREE.MeshLambertMaterial({ color: 0xa9784f })
+    new THREE.MeshBasicMaterial({ color: 0x9b6845 })
   );
   dirt.rotation.x = -Math.PI / 2;
   dirt.position.set(0, -0.006, -19.3);
@@ -178,7 +215,7 @@
 
   const innerGrass = new THREE.Mesh(
     new THREE.CircleGeometry(14.5, 48),
-    new THREE.MeshLambertMaterial({ color: 0x438b48 })
+    new THREE.MeshBasicMaterial({ color: 0x3f9148 })
   );
   innerGrass.rotation.x = -Math.PI / 2;
   innerGrass.position.set(0, 0, -19.3);
@@ -186,7 +223,7 @@
 
   const mound = new THREE.Mesh(
     new THREE.CircleGeometry(2.7, 32),
-    new THREE.MeshLambertMaterial({ color: 0xb38359 })
+    new THREE.MeshBasicMaterial({ color: 0xb07b52 })
   );
   mound.rotation.x = -Math.PI / 2;
   mound.position.set(0, 0.006, -18.44);
@@ -195,7 +232,7 @@
   function makeBase(x, z, rotationY) {
     const b = new THREE.Mesh(
       new THREE.BoxGeometry(0.42, 0.055, 0.42),
-      new THREE.MeshLambertMaterial({ color: 0xf4f2e8 })
+      new THREE.MeshBasicMaterial({ color: 0xf4f2e8 })
     );
     b.position.set(x, 0.035, z);
     b.rotation.y = rotationY || Math.PI / 4;
@@ -210,6 +247,8 @@
 
   function makePlayer(pos, rotY) {
     const p = parseFBX("player");
+    const removedJunk = stripOversizedFlatMeshes(p);
+    if (removedJunk > 0) console.log("removed player junk meshes:", removedJunk);
     scaleToHeight(p, 1.84);
     p.rotation.y = rotY;
     placeOnGround(p, pos);
@@ -231,7 +270,7 @@
   }
 
   try {
-    state.batter = makePlayer(new THREE.Vector3(0.82, 0, 0.38), Math.PI);
+    state.batter = makePlayer(new THREE.Vector3(0.86, 0, -0.05), Math.PI);
     state.pitcher = makePlayer(new THREE.Vector3(0, 0, -18.44), 0);
   } catch (e) {
     console.error("player load failed", e);
