@@ -22,8 +22,7 @@
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.15));
   renderer.shadowMap.enabled = false;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.82;
+  renderer.toneMapping = THREE.NoToneMapping;
   document.body.appendChild(renderer.domElement);
 
   function resizeRenderer() {
@@ -41,8 +40,8 @@
   }
   resizeRenderer();
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x31502c, 0.95));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.62);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x31502c, 0.62));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.42);
   sun.position.set(10, 18, 8);
   scene.add(sun);
 
@@ -208,12 +207,55 @@
       if (!o.isMesh) return;
       o.castShadow = false;
       o.receiveShadow = false;
-      if (o.material) {
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        mats.forEach((m) => {
-          if (m.map) m.map.encoding = THREE.sRGBEncoding;
+
+      const fixFieldMaterial = (m) => {
+        const n = (m && m.name ? m.name : "").toLowerCase();
+
+        // The downloaded FBX only uses White / Dirt / Grass materials.
+        // Force stable colors so FBX color-space/light settings cannot wash
+        // the whole stadium into white.
+        if (n.includes("grass")) {
+          return new THREE.MeshBasicMaterial({
+            name: m.name,
+            color: 0x3f8f4d,
+            side: THREE.DoubleSide
+          });
+        }
+        if (n.includes("dirt")) {
+          return new THREE.MeshBasicMaterial({
+            name: m.name,
+            color: 0xb78961,
+            side: THREE.DoubleSide
+          });
+        }
+        if (n.includes("white")) {
+          return new THREE.MeshBasicMaterial({
+            name: m.name,
+            color: 0xf2f0e8,
+            side: THREE.DoubleSide
+          });
+        }
+
+        // Unknown materials: preserve texture, but stop pure-white blowout.
+        if (m) {
+          if (m.map) {
+            m.map.encoding = THREE.sRGBEncoding;
+            m.map.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+          }
+          if (m.color && m.color.r > 0.96 && m.color.g > 0.96 && m.color.b > 0.96) {
+            m.color.setRGB(0.78, 0.78, 0.78);
+          }
+          if ("emissive" in m && m.emissive) m.emissive.setRGB(0, 0, 0);
+          if ("emissiveIntensity" in m) m.emissiveIntensity = 0;
           m.needsUpdate = true;
-        });
+        }
+        return m;
+      };
+
+      if (Array.isArray(o.material)) {
+        o.material = o.material.map(fixFieldMaterial);
+      } else if (o.material) {
+        o.material = fixFieldMaterial(o.material);
       }
     });
     scene.add(field);
@@ -280,9 +322,20 @@
               m.map.encoding = THREE.sRGBEncoding;
               m.map.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
               m.map.needsUpdate = true;
+              // With a texture, keep neutral base color so the texture is visible.
+              if (m.color) m.color.setRGB(1, 1, 1);
+            } else if (m.color) {
+              // Prevent untextured materials from becoming featureless pure white.
+              const mx = Math.max(m.color.r, m.color.g, m.color.b);
+              const mn = Math.min(m.color.r, m.color.g, m.color.b);
+              if (mx > 0.96 && (mx - mn) < 0.04) {
+                m.color.setRGB(0.72, 0.72, 0.72);
+              }
             }
+            if ("emissive" in m && m.emissive) m.emissive.setRGB(0, 0, 0);
+            if ("emissiveIntensity" in m) m.emissiveIntensity = 0;
             if ("metalness" in m) m.metalness = 0.0;
-            if ("roughness" in m) m.roughness = Math.max(0.72, m.roughness || 0);
+            if ("roughness" in m) m.roughness = Math.max(0.78, m.roughness || 0);
             m.needsUpdate = true;
           });
         }
