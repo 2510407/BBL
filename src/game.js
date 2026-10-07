@@ -7,6 +7,12 @@
   const TARGET_FPS = 45;
   const FRAME_TIME = 1 / TARGET_FPS;
 
+  // TEMP: manual placement mode for calibrating player coordinates.
+  const POSITION_EDIT_MODE = true;
+  const MOVE_STEP = 0.10;      // meters
+  const MOVE_STEP_FINE = 0.02; // Alt
+  const MOVE_STEP_COARSE = 0.50; // Shift
+
   const FIELD_FILE_NOTE = "현재 Baseball Field.fbx = 단순 잔디/흙 필드 모델";
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87bfe5);
@@ -80,7 +86,9 @@
     fpsTime: 0,
     fieldAnchors: null,
     batterStart: new THREE.Vector3(0.9, 0, 0),
-    pitcherStart: new THREE.Vector3(0, 0, -18.44)
+    pitcherStart: new THREE.Vector3(0, 0, -18.44),
+    selectedActor: null,
+    selectionHelper: null
   };
 
   function b64ToBuffer(b64) {
@@ -195,6 +203,94 @@
     prop.position.set(0, 0, 0);
     prop.rotation.set(0, 0, 0);
     return true;
+  }
+
+
+  function actorLabel(actor) {
+    if (actor === state.batter) return "BATTER";
+    if (actor === state.pitcher) return "PITCHER";
+    return "NONE";
+  }
+
+  function getEditStep(e) {
+    if (e && e.shiftKey) return MOVE_STEP_COARSE;
+    if (e && e.altKey) return MOVE_STEP_FINE;
+    return MOVE_STEP;
+  }
+
+  function updateCoordPanel() {
+    const panel = document.getElementById("coordPanel");
+    if (!panel) return;
+
+    const a = state.selectedActor;
+    if (!a) {
+      panel.innerHTML =
+        "<b>위치 조정 모드</b><br>" +
+        "선수 클릭 → 선택<br>" +
+        "←/→ X · ↑/↓ Z · PageUp/PageDown Y<br>" +
+        "Shift=0.50m · 기본=0.10m · Alt=0.02m";
+      return;
+    }
+
+    const p = a.position;
+    const r = a.rotation;
+    panel.innerHTML =
+      "<b>" + actorLabel(a) + "</b><br>" +
+      "X: " + p.x.toFixed(3) + "<br>" +
+      "Y: " + p.y.toFixed(3) + "<br>" +
+      "Z: " + p.z.toFixed(3) + "<br>" +
+      "RotY: " + THREE.MathUtils.radToDeg(r.y).toFixed(1) + "°<br>" +
+      "<span style='opacity:.75'>←/→ X · ↑/↓ Z · PgUp/PgDn Y</span>";
+  }
+
+  function refreshSelectionHelper() {
+    if (state.selectionHelper) {
+      scene.remove(state.selectionHelper);
+      state.selectionHelper.geometry && state.selectionHelper.geometry.dispose();
+      state.selectionHelper.material && state.selectionHelper.material.dispose();
+      state.selectionHelper = null;
+    }
+    if (!state.selectedActor) return;
+
+    state.selectionHelper = new THREE.BoxHelper(state.selectedActor, 0xffff00);
+    scene.add(state.selectionHelper);
+  }
+
+  function selectActor(actor) {
+    state.selectedActor = actor;
+    refreshSelectionHelper();
+    updateCoordPanel();
+  }
+
+  function moveSelected(dx, dy, dz) {
+    const a = state.selectedActor;
+    if (!a) return;
+
+    a.position.x += dx;
+    a.position.y += dy;
+    a.position.z += dz;
+    a.updateMatrixWorld(true);
+
+    if (state.selectionHelper) state.selectionHelper.update();
+    updateCoordPanel();
+  }
+
+  function copySelectedCoords() {
+    const a = state.selectedActor;
+    if (!a) return;
+
+    const p = a.position;
+    const text =
+      actorLabel(a) +
+      " x=" + p.x.toFixed(3) +
+      " y=" + p.y.toFixed(3) +
+      " z=" + p.z.toFixed(3) +
+      " rotY=" + THREE.MathUtils.radToDeg(a.rotation.y).toFixed(1);
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    setStatus(text);
   }
 
   function setStatus(t) {
@@ -604,7 +700,7 @@
       state.pitchAction.paused = true;
       state.pitchAction.time = 0;
       state.pitcherMixer.update(0);
-      snapPlayerToGround(state.pitcher, 0);
+      if (!POSITION_EDIT_MODE) snapPlayerToGround(state.pitcher, 0);
     });
   }
 
@@ -718,7 +814,9 @@
     const swingMs = state.swingAction
       ? Math.max(140, state.swingAction.getClip().duration * 1000 + 40)
       : 200;
-    setTimeout(() => snapPlayerToGround(state.batter, 0), swingMs);
+    if (!POSITION_EDIT_MODE) {
+      setTimeout(() => snapPlayerToGround(state.batter, 0), swingMs);
+    }
     setStatus("SWING");
   }
 
@@ -787,6 +885,32 @@
   $("resetBtn").onclick = resetBall;
 
   addEventListener("keydown", (e) => {
+    if (POSITION_EDIT_MODE && state.selectedActor) {
+      const step = getEditStep(e);
+
+      if (e.code === "ArrowLeft") {
+        e.preventDefault(); moveSelected(-step, 0, 0); return;
+      }
+      if (e.code === "ArrowRight") {
+        e.preventDefault(); moveSelected(step, 0, 0); return;
+      }
+      if (e.code === "ArrowUp") {
+        e.preventDefault(); moveSelected(0, 0, -step); return;
+      }
+      if (e.code === "ArrowDown") {
+        e.preventDefault(); moveSelected(0, 0, step); return;
+      }
+      if (e.code === "PageUp" || e.code === "KeyE") {
+        e.preventDefault(); moveSelected(0, step, 0); return;
+      }
+      if (e.code === "PageDown" || e.code === "KeyQ") {
+        e.preventDefault(); moveSelected(0, -step, 0); return;
+      }
+      if (e.code === "KeyC") {
+        e.preventDefault(); copySelectedCoords(); return;
+      }
+    }
+
     if (e.code === "KeyP") pitch();
     if (e.code === "Space" || e.code === "KeyS") {
       e.preventDefault();
@@ -821,6 +945,7 @@
     updateBall(dt);
 
     controls.update();
+    if (POSITION_EDIT_MODE && state.selectionHelper) state.selectionHelper.update();
     renderer.render(scene, camera);
 
     state.fpsFrames++;
