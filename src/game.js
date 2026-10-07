@@ -20,6 +20,12 @@
   const FINAL_BATTER_ROT_Y = Math.PI;
   const FINAL_PLAYER_SCALE = 1.750;
 
+  // Pitch animation sync tuning.
+  // The ball stays attached to the throwing hand until this normalized
+  // animation time, then detaches from the exact hand world position.
+  const PITCH_RELEASE_NORM = 0.58;
+  const BALL_HAND_OFFSET = new THREE.Vector3(0.028, 0.018, 0.020);
+
   const FIELD_FILE_NOTE = "현재 Baseball Field.fbx = 단순 잔디/흙 필드 모델";
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87bfe5);
@@ -83,7 +89,9 @@
     pitcherIdle: null,
     swingAction: null,
     pitchAction: null,
+    pitcherThrowHand: null,
     pitching: false,
+    pitchReleased: false,
     pitchT: 0,
     swingWindow: 0,
     hit: false,
@@ -216,6 +224,45 @@
     return true;
   }
 
+
+
+  function attachBallToThrowingHand() {
+    if (!state.ball || !state.pitcherThrowHand) return;
+
+    state.pitcherThrowHand.add(state.ball);
+    state.ball.position.copy(BALL_HAND_OFFSET);
+    state.ball.rotation.set(0, 0, 0);
+    state.ball.scale.setScalar(1);
+    state.ball.updateMatrixWorld(true);
+    state.pitchReleased = false;
+  }
+
+  function releaseBallFromThrowingHand() {
+    if (!state.ball || !state.pitcherThrowHand || state.pitchReleased) return;
+
+    // Preserve the exact world-space hand position at the release frame.
+    const worldPos = new THREE.Vector3();
+    state.ball.getWorldPosition(worldPos);
+
+    scene.add(state.ball);
+    state.ball.position.copy(worldPos);
+    state.ball.rotation.set(0, 0, 0);
+    state.ball.updateMatrixWorld(true);
+
+    state.pitchStart.copy(worldPos);
+    state.pitchReleased = true;
+    state.pitchT = 0;
+
+    // Aim to the strike-zone target from the actual hand release point.
+    const travel = 0.46;
+    state.ballVelocity
+      .copy(state.pitchEnd)
+      .sub(worldPos)
+      .multiplyScalar(1 / travel);
+
+    // Slight upward compensation so gravity still lands in the target area.
+    state.ballVelocity.y += 0.5 * 9.81 * travel;
+  }
 
   function actorLabel(actor) {
     if (actor === state.batter) return "BATTER";
@@ -727,6 +774,8 @@
 
   setGameplayCamera();
 
+  state.pitcherThrowHand = findBone(state.pitcher, "RightHand");
+
   state.batterMixer = new THREE.AnimationMixer(state.batter);
   state.pitcherMixer = new THREE.AnimationMixer(state.pitcher);
 
@@ -765,6 +814,10 @@
       state.pitchAction.reset();
       state.pitchAction.play();
       state.pitchAction.paused = true;
+      if (state.pitching && !state.pitchReleased) {
+        releaseBallFromThrowingHand();
+      }
+
       state.pitchAction.time = 0;
       state.pitcherMixer.update(0);
       // Keep manually calibrated pitcher Y.
@@ -835,43 +888,62 @@
     state.glove = parseFBX("glove");
     scaleToSize(state.glove, 0.30);
     if (attachProp(state.glove, state.pitcher, "LeftHand")) {
-      state.glove.position.set(0, 0, 0);
+      state.glove.position.set(0.018, 0.015, 0.010);
       state.glove.rotation.set(0, 0, 0);
     }
   } catch (e) {
     console.warn("glove load failed", e);
   }
 
-  // Lightweight ball for prototype. The detailed FBX ball stays in the repo
-  // and can be re-enabled after the core gameplay is stable.
+  // Lightweight gameplay ball. It is parented to the pitcher's throwing hand
+  // before the pitch and released from that exact hand position.
   state.ball = new THREE.Mesh(
-    new THREE.SphereGeometry(0.037, 12, 8),
-    new THREE.MeshStandardMaterial({ color: 0xf4f2e9, roughness: 0.75 })
+    new THREE.SphereGeometry(0.037, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0xf6f3e9 })
   );
-  scene.add(state.ball);
+  if (state.pitcherThrowHand) {
+    attachBallToThrowingHand();
+  } else {
+    scene.add(state.ball);
+    state.ball.position.copy(state.pitchStart);
+  }
 
   function resetBall() {
     state.pitching = false;
     state.hit = false;
     state.ballAirborne = false;
+    state.pitchReleased = false;
     state.pitchT = 0;
     state.swingWindow = 0;
     state.ballVelocity.set(0, 0, 0);
-    state.ball.position.copy(state.pitchStart);
+
+    if (state.pitcherThrowHand) {
+      attachBallToThrowingHand();
+    } else {
+      scene.add(state.ball);
+      state.ball.position.copy(state.pitchStart);
+    }
   }
 
   function pitch() {
     if (state.pitching || state.ballAirborne) return;
+
     state.pitching = true;
+    state.pitchReleased = false;
     state.pitchT = 0;
     state.hit = false;
+
+    if (state.pitcherThrowHand) attachBallToThrowingHand();
+
     if (state.pitchAction) {
       state.pitchAction.paused = false;
       state.pitchAction.stop();
       state.pitchAction.reset();
       state.pitchAction.setLoop(THREE.LoopOnce, 1);
+      state.pitchAction.clampWhenFinished = false;
       state.pitchAction.play();
     }
+
     setStatus("PITCH");
   }
 
@@ -900,31 +972,41 @@
 
   function updateBall(dt) {
     if (state.pitching) {
-      state.pitchT += dt;
-      const releaseDelay = 0.24;
-      const travel = 0.49;
+      // Before release, the ball is literally a child of the throwing hand.
+      if (!state.pitchReleased) {
+        if (state.pitchAction) {
+          const dur = Math.max(state.pitchAction.getClip().duration, 0.001);
+          const norm = state.pitchAction.time / dur;
 
-      if (state.pitchT < releaseDelay) {
-        state.ball.position.copy(state.pitchStart);
-        return;
+          if (norm >= PITCH_RELEASE_NORM) {
+            releaseBallFromThrowingHand();
+          }
+        } else {
+          releaseBallFromThrowingHand();
+        }
       }
 
-      let t = (state.pitchT - releaseDelay) / travel;
-      t = Math.min(Math.max(t, 0), 1);
+      // After release, use a simple ballistic flight from the actual hand point.
+      if (state.pitchReleased) {
+        state.pitchT += dt;
+        state.ballVelocity.y -= 9.81 * dt;
+        state.ball.position.addScaledVector(state.ballVelocity, dt);
 
-      state.ball.position.lerpVectors(state.pitchStart, state.pitchEnd, t);
-      state.ball.position.y += 0.13 * Math.sin(Math.PI * t) - 0.16 * t * t;
+        // Contact window near home plate.
+        const toPlate = state.ball.position.distanceTo(state.pitchEnd);
+        if (state.swingWindow > 0 && !state.hit && toPlate < 1.0) {
+          const dx = Math.abs(state.ball.position.x - state.pitchEnd.x);
+          const dy = Math.abs(state.ball.position.y - state.pitchEnd.y);
+          if (dx < 0.65 && dy < 0.65) hitBall();
+        }
 
-      if (state.swingWindow > 0 && !state.hit && t > 0.78 && t < 1.01) {
-        const dx = Math.abs(state.ball.position.x - 0.18);
-        const dy = Math.abs(state.ball.position.y - 0.98);
-        if (dx < 0.55 && dy < 0.55) hitBall();
-      }
-
-      if (t >= 1 && !state.hit) {
-        state.pitching = false;
-        setStatus("MISS / TAKE");
-        setTimeout(resetBall, 600);
+        // Crossed / reached the plate without contact.
+        const passedPlate = state.ball.position.z > state.pitchEnd.z + 0.35;
+        if (passedPlate && !state.hit) {
+          state.pitching = false;
+          setStatus("MISS / TAKE");
+          setTimeout(resetBall, 650);
+        }
       }
     } else if (state.ballAirborne) {
       state.ballVelocity.y -= 9.81 * dt;
