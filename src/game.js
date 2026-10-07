@@ -8,7 +8,7 @@
   const FRAME_TIME = 1 / TARGET_FPS;
 
   // TEMP: manual placement mode for calibrating player coordinates.
-  const POSITION_EDIT_MODE = false;
+  const POSITION_EDIT_MODE = true;
   const MOVE_STEP = 0.10;      // meters
   const MOVE_STEP_FINE = 0.02; // Alt
   const MOVE_STEP_COARSE = 0.50; // Shift
