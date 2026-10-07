@@ -3,10 +3,11 @@
   const A = window.ASSET_DATA;
   const $ = (id) => document.getElementById(id);
 
-  const RENDER_SCALE = 0.72;
+  const RENDER_SCALE = 0.90;
   const TARGET_FPS = 45;
   const FRAME_TIME = 1 / TARGET_FPS;
 
+  const FIELD_FILE_NOTE = "현재 Baseball Field.fbx = 단순 잔디/흙 필드 모델";
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87bfe5);
 
@@ -15,12 +16,14 @@
   camera.lookAt(0, 1.05, -13.5);
 
   const renderer = new THREE.WebGLRenderer({
-    antialias: false,
+    antialias: true,
     powerPreference: "high-performance"
   });
   renderer.outputEncoding = THREE.sRGBEncoding;
-  renderer.setPixelRatio(1);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.15));
   renderer.shadowMap.enabled = false;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.82;
   document.body.appendChild(renderer.domElement);
 
   function resizeRenderer() {
@@ -38,8 +41,8 @@
   }
   resizeRenderer();
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x31502c, 1.55));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x31502c, 0.95));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.62);
   sun.position.set(10, 18, 8);
   scene.add(sun);
 
@@ -273,7 +276,13 @@
         if (o.material) {
           const mats = Array.isArray(o.material) ? o.material : [o.material];
           mats.forEach((m) => {
-            if (m.map) m.map.encoding = THREE.sRGBEncoding;
+            if (m.map) {
+              m.map.encoding = THREE.sRGBEncoding;
+              m.map.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+              m.map.needsUpdate = true;
+            }
+            if ("metalness" in m) m.metalness = 0.0;
+            if ("roughness" in m) m.roughness = Math.max(0.72, m.roughness || 0);
             m.needsUpdate = true;
           });
         }
@@ -299,7 +308,6 @@
     state.batter.animations && state.batter.animations[0]
       ? state.batter.animations[0]
       : null;
-  const pitcherIdleClip = firstClip("fielderIdle");
   const hitR = firstClip("hitRight");
   const pitchR = firstClip("pitchRight");
 
@@ -308,14 +316,8 @@
     state.batterIdle.play();
   }
 
-  if (pitcherIdleClip) {
-    state.pitcherIdle = state.pitcherMixer.clipAction(pitcherIdleClip);
-    state.pitcherIdle.play();
-  } else if (state.pitcher.animations && state.pitcher.animations[0]) {
-    state.pitcherIdle = state.pitcherMixer.clipAction(state.pitcher.animations[0]);
-    state.pitcherIdle.play();
-  }
-
+  // Pitcher idle = first frame of Pitch Right, frozen.
+  // Fielder idle is reserved for actual fielders only.
   if (hitR) {
     state.swingAction = state.batterMixer.clipAction(hitR);
     state.swingAction.setLoop(THREE.LoopOnce, 1);
@@ -325,7 +327,21 @@
   if (pitchR) {
     state.pitchAction = state.pitcherMixer.clipAction(pitchR);
     state.pitchAction.setLoop(THREE.LoopOnce, 1);
-    state.pitchAction.clampWhenFinished = true;
+    state.pitchAction.clampWhenFinished = false;
+    state.pitchAction.play();
+    state.pitchAction.paused = true;
+    state.pitchAction.time = 0;
+    state.pitcherMixer.update(0);
+
+    state.pitcherMixer.addEventListener("finished", (e) => {
+      if (e.action !== state.pitchAction) return;
+      state.pitchAction.stop();
+      state.pitchAction.reset();
+      state.pitchAction.play();
+      state.pitchAction.paused = true;
+      state.pitchAction.time = 0;
+      state.pitcherMixer.update(0);
+    });
   }
 
   function playOnce(action, idleAction) {
@@ -422,7 +438,13 @@
     state.pitching = true;
     state.pitchT = 0;
     state.hit = false;
-    playOnce(state.pitchAction, state.pitcherIdle);
+    if (state.pitchAction) {
+      state.pitchAction.paused = false;
+      state.pitchAction.stop();
+      state.pitchAction.reset();
+      state.pitchAction.setLoop(THREE.LoopOnce, 1);
+      state.pitchAction.play();
+    }
     setStatus("PITCH");
   }
 
