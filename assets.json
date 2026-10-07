@@ -1,0 +1,34 @@
+{
+  "models": {
+    "player": "models/BaseballPlayer.fbx",
+    "field": "models/Baseball Field.fbx",
+    "ball": "models/baseball.fbx",
+    "bat": "models/baseball_bat.fbx",
+    "glove": "models/baseball_gloves.fbx"
+  },
+  "animations": {
+    "pitchRight": "animations/Baseball Pitching right.fbx",
+    "pitchLeft": "animations/Baseball Pitching left.fbx",
+    "hitRight": "animations/Baseball Hit right.fbx",
+    "hitLeft": "animations/Baseball Hit left.fbx",
+    "idleRight": "animations/Baseball Idle right.fbx",
+    "idleLeft": "animations/Baseball Idle left.fbx",
+    "run": "animations/Baseball Running.fbx",
+    "runBase": "animations/Baseball Running base.fbx",
+    "slideRight": "animations/Baseball Running Slide right.fbx",
+    "slideLeft": "animations/Baseball Running Slide left.fbx",
+    "throwRight": "animations/Baseball Overhand Throw right.fbx",
+    "throwLeft": "animations/Baseball Overhand Throw left.fbx",
+    "fielderIdle": "animations/Baseball Fielder idle.fbx",
+    "fielderJump": "animations/Baseball Fielder Jumping.fbx",
+    "pickupRight": "animations/Baseball pick up right.fbx",
+    "pickupLeft": "animations/Baseball pick up left.fbx"
+  },
+  "textures": {
+    "batAlbedo": "textures/__Albedo.png",
+    "batNormal": "textures/__Normal.png",
+    "batMetalness": "textures/__Metalness.png",
+    "batRoughness": "textures/__Roughness.png",
+    "batAO": "textures/__AO.png"
+  }
+}
