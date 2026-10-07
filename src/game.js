@@ -40,8 +40,8 @@
   }
   resizeRenderer();
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x31502c, 0.62));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.42);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x31502c, 0.32));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.22);
   sun.position.set(10, 18, 8);
   scene.add(sun);
 
@@ -103,6 +103,44 @@
     if (size.y > 0.0001) {
       obj.scale.multiplyScalar(height / size.y);
       obj.updateMatrixWorld(true);
+    }
+  }
+
+  function getPlayerBounds(actor) {
+    actor.updateMatrixWorld(true);
+    const total = new THREE.Box3();
+    let found = false;
+
+    actor.traverse((o) => {
+      if (!o.visible || !o.isSkinnedMesh) return;
+      const b = new THREE.Box3().setFromObject(o);
+      if (!b.isEmpty()) {
+        if (!found) total.copy(b);
+        else total.union(b);
+        found = true;
+      }
+    });
+
+    if (!found) return new THREE.Box3().setFromObject(actor);
+    return total;
+  }
+
+  function scalePlayerToHeight(actor, height) {
+    const b = getPlayerBounds(actor);
+    const s = new THREE.Vector3();
+    b.getSize(s);
+    if (s.y > 0.0001) {
+      actor.scale.multiplyScalar(height / s.y);
+      actor.updateMatrixWorld(true);
+    }
+  }
+
+  function snapPlayerToGround(actor, groundY = 0) {
+    actor.updateMatrixWorld(true);
+    const b = getPlayerBounds(actor);
+    if (!b.isEmpty() && Number.isFinite(b.min.y)) {
+      actor.position.y += groundY - b.min.y;
+      actor.updateMatrixWorld(true);
     }
   }
 
@@ -342,8 +380,8 @@
 
     // Right-handed batter stands on the third-base side of home.
     state.batterStart.copy(a.home)
-      .addScaledVector(thirdDir, 0.92)
-      .addScaledVector(forward, -0.12);
+      .addScaledVector(thirdDir, 1.48)
+      .addScaledVector(forward, 0.10);
     state.batterStart.y = 0;
 
     state.pitchStart.copy(state.pitcherStart);
@@ -474,36 +512,40 @@
     const p = parseFBX("player");
     const removedJunk = stripOversizedFlatMeshes(p);
     if (removedJunk > 0) console.log("removed player junk meshes:", removedJunk);
-    scaleToHeight(p, 1.84);
+    scalePlayerToHeight(p, 1.84);
     p.rotation.y = rotY;
-    placeOnGround(p, pos);
+    p.position.copy(pos);
+    snapPlayerToGround(p, pos.y);
     p.traverse((o) => {
       if (o.isMesh) {
         o.castShadow = false;
         o.receiveShadow = false;
         if (o.material) {
-          const mats = Array.isArray(o.material) ? o.material : [o.material];
-          mats.forEach((m) => {
+          const source = Array.isArray(o.material) ? o.material : [o.material];
+
+          const toUnlit = (m) => {
             if (m.map) {
               m.map.encoding = THREE.sRGBEncoding;
               m.map.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
               m.map.needsUpdate = true;
-              // With a texture, keep neutral base color so the texture is visible.
-              if (m.color) m.color.setRGB(1, 1, 1);
-            } else if (m.color) {
-              // Prevent untextured materials from becoming featureless pure white.
-              const mx = Math.max(m.color.r, m.color.g, m.color.b);
-              const mn = Math.min(m.color.r, m.color.g, m.color.b);
-              if (mx > 0.96 && (mx - mn) < 0.04) {
-                m.color.setRGB(0.72, 0.72, 0.72);
-              }
             }
-            if ("emissive" in m && m.emissive) m.emissive.setRGB(0, 0, 0);
-            if ("emissiveIntensity" in m) m.emissiveIntensity = 0;
-            if ("metalness" in m) m.metalness = 0.0;
-            if ("roughness" in m) m.roughness = Math.max(0.78, m.roughness || 0);
-            m.needsUpdate = true;
-          });
+
+            const baseColor = m.color ? m.color.clone() : new THREE.Color(0xffffff);
+
+            return new THREE.MeshBasicMaterial({
+              map: m.map || null,
+              color: m.map ? 0xffffff : baseColor,
+              transparent: !!m.transparent,
+              opacity: m.opacity == null ? 1 : m.opacity,
+              alphaTest: m.alphaTest || 0,
+              side: m.side == null ? THREE.FrontSide : m.side,
+              skinning: true
+            });
+          };
+
+          o.material = Array.isArray(o.material)
+            ? source.map(toUnlit)
+            : toUnlit(source[0]);
         }
       }
     });
@@ -562,6 +604,7 @@
       state.pitchAction.paused = true;
       state.pitchAction.time = 0;
       state.pitcherMixer.update(0);
+      snapPlayerToGround(state.pitcher, 0);
     });
   }
 
@@ -672,6 +715,10 @@
   function swing() {
     state.swingWindow = 0.23;
     playOnce(state.swingAction, state.batterIdle);
+    const swingMs = state.swingAction
+      ? Math.max(140, state.swingAction.getClip().duration * 1000 + 40)
+      : 200;
+    setTimeout(() => snapPlayerToGround(state.batter, 0), swingMs);
     setStatus("SWING");
   }
 
