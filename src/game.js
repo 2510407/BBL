@@ -8,17 +8,17 @@
   const FRAME_TIME = 1 / TARGET_FPS;
 
   // TEMP: manual placement mode for calibrating player coordinates.
-  const POSITION_EDIT_MODE = true;
+  const POSITION_EDIT_MODE = false;
   const MOVE_STEP = 0.10;      // meters
   const MOVE_STEP_FINE = 0.02; // Alt
   const MOVE_STEP_COARSE = 0.50; // Shift
 
   // Final manual calibration from in-game editor.
-  const FINAL_PITCHER_POS = new THREE.Vector3(0.000, 0.410, -20.880);
+  const FINAL_PITCHER_POS = new THREE.Vector3(-0.040, 0.250, -19.820);
   const FINAL_BATTER_POS  = new THREE.Vector3(-2.656, 0.010, 1.444);
   const FINAL_PITCHER_ROT_Y = 0;
   const FINAL_BATTER_ROT_Y = Math.PI;
-  const FINAL_PLAYER_SCALE = 2.250;
+  const FINAL_PLAYER_SCALE = 1.750;
 
   const FIELD_FILE_NOTE = "현재 Baseball Field.fbx = 단순 잔디/흙 필드 모델";
   const scene = new THREE.Scene();
