@@ -91,7 +91,8 @@
     pitcherStart: new THREE.Vector3(0, 0, -18.44),
     selectedActor: null,
     selectionHelper: null,
-    editStep: MOVE_STEP
+    editStep: MOVE_STEP,
+    scaleStep: 0.05
   };
 
   function b64ToBuffer(b64) {
@@ -221,6 +222,39 @@
     return state.editStep || MOVE_STEP;
   }
 
+
+  function getEditorScale(actor) {
+    if (!actor) return 1;
+    if (actor.userData.editorScale == null) actor.userData.editorScale = 1;
+    return actor.userData.editorScale;
+  }
+
+  function scaleSelected(delta) {
+    const a = state.selectedActor;
+    if (!a) return;
+
+    const oldScale = getEditorScale(a);
+    const newScale = Math.max(0.20, Math.min(3.00, oldScale + delta));
+    const factor = newScale / oldScale;
+
+    // Keep the player's feet at the same world height while scaling.
+    const before = getPlayerBounds(a);
+    const beforeMinY = before.min.y;
+
+    a.scale.multiplyScalar(factor);
+    a.userData.editorScale = newScale;
+    a.updateMatrixWorld(true);
+
+    const after = getPlayerBounds(a);
+    if (!after.isEmpty() && Number.isFinite(beforeMinY) && Number.isFinite(after.min.y)) {
+      a.position.y += beforeMinY - after.min.y;
+      a.updateMatrixWorld(true);
+    }
+
+    if (state.selectionHelper) state.selectionHelper.update();
+    updateCoordPanel();
+  }
+
   function updateCoordPanel() {
     const panel = document.getElementById("coordPanel");
     if (!panel) return;
@@ -243,8 +277,10 @@
       "Y: " + p.y.toFixed(3) + "<br>" +
       "Z: " + p.z.toFixed(3) + "<br>" +
       "RotY: " + THREE.MathUtils.radToDeg(r.y).toFixed(1) + "°<br>" +
-      "Step: " + state.editStep.toFixed(2) + "m<br>" +
-      "<span style='opacity:.75'>←/→ X · ↑/↓ Z · PgUp/PgDn 또는 E/Q = Y</span>";
+      "Scale: " + getEditorScale(a).toFixed(2) + "x<br>" +
+      "Move Step: " + state.editStep.toFixed(2) + "m<br>" +
+      "Scale Step: " + state.scaleStep.toFixed(2) + "x<br>" +
+      "<span style='opacity:.75'>←/→ X · ↑/↓ Z · PgUp/PgDn 또는 E/Q = Y · [ ] = 크기</span>";
   }
 
   function refreshSelectionHelper() {
@@ -289,7 +325,8 @@
       " x=" + p.x.toFixed(3) +
       " y=" + p.y.toFixed(3) +
       " z=" + p.z.toFixed(3) +
-      " rotY=" + THREE.MathUtils.radToDeg(a.rotation.y).toFixed(1);
+      " rotY=" + THREE.MathUtils.radToDeg(a.rotation.y).toFixed(1) +
+      " scale=" + getEditorScale(a).toFixed(3);
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).catch(() => {});
@@ -649,6 +686,7 @@
         }
       }
     });
+    p.userData.editorScale = 1.0;
     scene.add(p);
     return p;
   }
@@ -910,6 +948,12 @@
       if (e.code === "PageDown" || e.code === "KeyQ") {
         e.preventDefault(); moveSelected(0, -step, 0); return;
       }
+      if (e.code === "BracketLeft" || e.code === "Minus") {
+        e.preventDefault(); scaleSelected(-state.scaleStep); return;
+      }
+      if (e.code === "BracketRight" || e.code === "Equal") {
+        e.preventDefault(); scaleSelected(state.scaleStep); return;
+      }
       if (e.code === "KeyC") {
         e.preventDefault(); copySelectedCoords(); return;
       }
@@ -981,8 +1025,12 @@
 
     const moveRow1 = document.createElement("div");
     const moveRow2 = document.createElement("div");
+    const scaleRow = document.createElement("div");
+    const scaleStepRow = document.createElement("div");
     editor.appendChild(moveRow1);
     editor.appendChild(moveRow2);
+    editor.appendChild(scaleRow);
+    editor.appendChild(scaleStepRow);
 
     moveRow1.appendChild(editorButton("X−", () => moveSelected(-state.editStep, 0, 0)));
     moveRow1.appendChild(editorButton("X+", () => moveSelected( state.editStep, 0, 0)));
@@ -992,6 +1040,15 @@
     moveRow2.appendChild(editorButton("Y−", () => moveSelected(0, -state.editStep, 0)));
     moveRow2.appendChild(editorButton("Y+", () => moveSelected(0,  state.editStep, 0)));
     moveRow2.appendChild(editorButton("좌표 복사", copySelectedCoords));
+
+    scaleRow.style.marginTop = "5px";
+    scaleRow.appendChild(editorButton("크기−", () => scaleSelected(-state.scaleStep)));
+    scaleRow.appendChild(editorButton("크기+", () => scaleSelected( state.scaleStep)));
+
+    scaleStepRow.appendChild(document.createTextNode("크기 이동량 "));
+    scaleStepRow.appendChild(editorButton("0.01", () => { state.scaleStep = 0.01; updateCoordPanel(); }));
+    scaleStepRow.appendChild(editorButton("0.05", () => { state.scaleStep = 0.05; updateCoordPanel(); }));
+    scaleStepRow.appendChild(editorButton("0.10", () => { state.scaleStep = 0.10; updateCoordPanel(); }));
 
     const coordPanel = document.createElement("div");
     coordPanel.id = "coordPanel";
