@@ -30,6 +30,8 @@
   renderer.shadowMap.enabled = false;
   renderer.toneMapping = THREE.NoToneMapping;
   document.body.appendChild(renderer.domElement);
+  renderer.domElement.tabIndex = 0;
+  renderer.domElement.style.outline = "none";
 
   function resizeRenderer() {
     const w = innerWidth;
@@ -88,7 +90,8 @@
     batterStart: new THREE.Vector3(0.9, 0, 0),
     pitcherStart: new THREE.Vector3(0, 0, -18.44),
     selectedActor: null,
-    selectionHelper: null
+    selectionHelper: null,
+    editStep: MOVE_STEP
   };
 
   function b64ToBuffer(b64) {
@@ -215,7 +218,7 @@
   function getEditStep(e) {
     if (e && e.shiftKey) return MOVE_STEP_COARSE;
     if (e && e.altKey) return MOVE_STEP_FINE;
-    return MOVE_STEP;
+    return state.editStep || MOVE_STEP;
   }
 
   function updateCoordPanel() {
@@ -240,7 +243,8 @@
       "Y: " + p.y.toFixed(3) + "<br>" +
       "Z: " + p.z.toFixed(3) + "<br>" +
       "RotY: " + THREE.MathUtils.radToDeg(r.y).toFixed(1) + "°<br>" +
-      "<span style='opacity:.75'>←/→ X · ↑/↓ Z · PgUp/PgDn Y</span>";
+      "Step: " + state.editStep.toFixed(2) + "m<br>" +
+      "<span style='opacity:.75'>←/→ X · ↑/↓ Z · PgUp/PgDn 또는 E/Q = Y</span>";
   }
 
   function refreshSelectionHelper() {
@@ -925,6 +929,106 @@
   perf.style.marginTop = "5px";
   perf.textContent = "성능 모드";
   document.getElementById("hud").appendChild(perf);
+
+
+  // TEMP placement editor UI. This is intentionally button-driven as well as
+  // mouse/keyboard-driven because Colab iframes can steal keyboard focus.
+  if (POSITION_EDIT_MODE) {
+    const editor = document.createElement("div");
+    editor.id = "positionEditorUI";
+    editor.style.marginTop = "8px";
+    editor.style.paddingTop = "8px";
+    editor.style.borderTop = "1px solid rgba(255,255,255,.18)";
+    editor.style.fontSize = "12px";
+    editor.style.lineHeight = "1.4";
+    document.getElementById("hud").appendChild(editor);
+
+    const title = document.createElement("div");
+    title.innerHTML = "<b>선수 위치 조정</b>";
+    title.style.marginBottom = "6px";
+    editor.appendChild(title);
+
+    const selectRow = document.createElement("div");
+    selectRow.style.marginBottom = "6px";
+    editor.appendChild(selectRow);
+
+    function editorButton(label, fn) {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.fontSize = "11px";
+      b.style.padding = "5px 7px";
+      b.style.margin = "2px 3px 2px 0";
+      b.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        fn();
+        renderer.domElement.focus();
+      };
+      return b;
+    }
+
+    selectRow.appendChild(editorButton("타자 선택", () => selectActor(state.batter)));
+    selectRow.appendChild(editorButton("투수 선택", () => selectActor(state.pitcher)));
+
+    const stepRow = document.createElement("div");
+    stepRow.style.marginBottom = "6px";
+    editor.appendChild(stepRow);
+
+    stepRow.appendChild(document.createTextNode("이동량 "));
+    stepRow.appendChild(editorButton("0.02", () => { state.editStep = 0.02; updateCoordPanel(); }));
+    stepRow.appendChild(editorButton("0.10", () => { state.editStep = 0.10; updateCoordPanel(); }));
+    stepRow.appendChild(editorButton("0.50", () => { state.editStep = 0.50; updateCoordPanel(); }));
+
+    const moveRow1 = document.createElement("div");
+    const moveRow2 = document.createElement("div");
+    editor.appendChild(moveRow1);
+    editor.appendChild(moveRow2);
+
+    moveRow1.appendChild(editorButton("X−", () => moveSelected(-state.editStep, 0, 0)));
+    moveRow1.appendChild(editorButton("X+", () => moveSelected( state.editStep, 0, 0)));
+    moveRow1.appendChild(editorButton("Z−", () => moveSelected(0, 0, -state.editStep)));
+    moveRow1.appendChild(editorButton("Z+", () => moveSelected(0, 0,  state.editStep)));
+
+    moveRow2.appendChild(editorButton("Y−", () => moveSelected(0, -state.editStep, 0)));
+    moveRow2.appendChild(editorButton("Y+", () => moveSelected(0,  state.editStep, 0)));
+    moveRow2.appendChild(editorButton("좌표 복사", copySelectedCoords));
+
+    const coordPanel = document.createElement("div");
+    coordPanel.id = "coordPanel";
+    coordPanel.style.marginTop = "7px";
+    coordPanel.style.padding = "6px";
+    coordPanel.style.background = "rgba(255,255,255,.08)";
+    coordPanel.style.borderRadius = "6px";
+    editor.appendChild(coordPanel);
+
+    updateCoordPanel();
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+
+    renderer.domElement.addEventListener("pointerdown", (e) => {
+      renderer.domElement.focus();
+      if (e.button !== 0) return;
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycaster.setFromCamera(pointer, camera);
+      const targets = [state.batter, state.pitcher].filter(Boolean);
+      const hits = raycaster.intersectObjects(targets, true);
+
+      if (!hits.length) return;
+
+      let n = hits[0].object;
+      while (n && n !== state.batter && n !== state.pitcher) n = n.parent;
+
+      if (n === state.batter || n === state.pitcher) selectActor(n);
+    });
+
+    // Select batter initially so the controls work immediately.
+    selectActor(state.batter);
+  }
 
   let accumulator = 0;
 
