@@ -8,10 +8,17 @@
   const FRAME_TIME = 1 / TARGET_FPS;
 
   // TEMP: manual placement mode for calibrating player coordinates.
-  const POSITION_EDIT_MODE = true;
+  const POSITION_EDIT_MODE = false;
   const MOVE_STEP = 0.10;      // meters
   const MOVE_STEP_FINE = 0.02; // Alt
   const MOVE_STEP_COARSE = 0.50; // Shift
+
+  // Final manual calibration from in-game editor.
+  const FINAL_PITCHER_POS = new THREE.Vector3(0.000, 0.410, -20.880);
+  const FINAL_BATTER_POS  = new THREE.Vector3(-2.656, 0.010, 1.444);
+  const FINAL_PITCHER_ROT_Y = 0;
+  const FINAL_BATTER_ROT_Y = Math.PI;
+  const FINAL_PLAYER_SCALE = 2.250;
 
   const FIELD_FILE_NOTE = "현재 Baseball Field.fbx = 단순 잔디/흙 필드 모델";
   const scene = new THREE.Scene();
@@ -527,6 +534,23 @@
     state.pitchEnd.y = 1.00;
 
     state.fieldAnchors = { home: a.home, second: a.second, first, third, forward };
+
+    // Manual placement wins over automatic field-derived player placement.
+    state.pitcherStart.copy(FINAL_PITCHER_POS);
+    state.batterStart.copy(FINAL_BATTER_POS);
+
+    // Approximate pitch path for this calibrated player scale.
+    state.pitchStart.set(
+      FINAL_PITCHER_POS.x,
+      FINAL_PITCHER_POS.y + (1.60 * FINAL_PLAYER_SCALE),
+      FINAL_PITCHER_POS.z
+    );
+    state.pitchEnd.set(
+      FINAL_BATTER_POS.x * 0.15,
+      1.00,
+      0.10
+    );
+
     console.log("Field calibrated", state.fieldAnchors);
     return state.fieldAnchors;
   }
@@ -650,9 +674,10 @@
     const removedJunk = stripOversizedFlatMeshes(p);
     if (removedJunk > 0) console.log("removed player junk meshes:", removedJunk);
     scalePlayerToHeight(p, 1.84);
+    p.scale.multiplyScalar(FINAL_PLAYER_SCALE);
+    p.userData.editorScale = FINAL_PLAYER_SCALE;
     p.rotation.y = rotY;
     p.position.copy(pos);
-    snapPlayerToGround(p, pos.y);
     p.traverse((o) => {
       if (o.isMesh) {
         o.castShadow = false;
@@ -686,14 +711,14 @@
         }
       }
     });
-    p.userData.editorScale = 1.0;
+    if (p.userData.editorScale == null) p.userData.editorScale = FINAL_PLAYER_SCALE;
     scene.add(p);
     return p;
   }
 
   try {
-    state.batter = makePlayer(state.batterStart.clone(), Math.PI);
-    state.pitcher = makePlayer(state.pitcherStart.clone(), 0);
+    state.batter = makePlayer(FINAL_BATTER_POS.clone(), FINAL_BATTER_ROT_Y);
+    state.pitcher = makePlayer(FINAL_PITCHER_POS.clone(), FINAL_PITCHER_ROT_Y);
   } catch (e) {
     console.error("player load failed", e);
     setStatus("선수 로드 실패: " + e.message);
@@ -742,7 +767,7 @@
       state.pitchAction.paused = true;
       state.pitchAction.time = 0;
       state.pitcherMixer.update(0);
-      if (!POSITION_EDIT_MODE) snapPlayerToGround(state.pitcher, 0);
+      // Keep manually calibrated pitcher Y.
     });
   }
 
@@ -856,9 +881,7 @@
     const swingMs = state.swingAction
       ? Math.max(140, state.swingAction.getClip().duration * 1000 + 40)
       : 200;
-    if (!POSITION_EDIT_MODE) {
-      setTimeout(() => snapPlayerToGround(state.batter, 0), swingMs);
-    }
+    // Keep manually calibrated batter Y.
     setStatus("SWING");
   }
 
