@@ -27,7 +27,7 @@
   const BALL_HAND_OFFSET = new THREE.Vector3(0.038, -0.006, 0.012);
 
   // TEMP: bat / glove transform editor.
-  const EQUIPMENT_EDIT_MODE = false;
+  const EQUIPMENT_EDIT_MODE = true;
 
   // TEMP: ball visual-size editor.
   const BALL_EDIT_MODE = true;
@@ -38,6 +38,12 @@
   const EQUIP_MOVE_STEPS = [0.010, 0.050, 0.100];
   const EQUIP_ROT_STEPS = [1, 5, 15];
   const EQUIP_SCALE_STEPS = [0.01, 0.05, 0.10];
+
+  const CALIBRATED_BAT_OFFSET = new THREE.Vector3(-0.535, 0.455, -0.145);
+  const CALIBRATED_BAT_ROT = new THREE.Vector3(12.9, -60.0, 50.0);
+
+  const CALIBRATED_GLOVE_OFFSET = new THREE.Vector3(-0.035, -0.160, 0.020);
+  const CALIBRATED_GLOVE_ROT = new THREE.Vector3(55.0, -40.0, 35.0);
 
   const FIELD_FILE_NOTE = "현재 Baseball Field.fbx = 단순 잔디/흙 필드 모델";
   const scene = new THREE.Scene();
@@ -125,7 +131,8 @@
     equipMoveStep: 0.010,
     equipRotStep: 5,
     equipScaleStep: 0.05,
-    ballScaleStep: 0.10
+    ballScaleStep: 0.10,
+    ballMoveStep: 0.010
   };
 
   function b64ToBuffer(b64) {
@@ -945,13 +952,13 @@
       state.batter,
       "RightHand",
       0.88,
-      new THREE.Vector3(-0.535, 0.455, -0.145)
+      CALIBRATED_BAT_OFFSET.clone()
     );
     if (batBone) {
       state.bat.rotation.set(
-        THREE.MathUtils.degToRad(12.9),
-        THREE.MathUtils.degToRad(-60.0),
-        THREE.MathUtils.degToRad(50.0)
+        THREE.MathUtils.degToRad(CALIBRATED_BAT_ROT.x),
+        THREE.MathUtils.degToRad(CALIBRATED_BAT_ROT.y),
+        THREE.MathUtils.degToRad(CALIBRATED_BAT_ROT.z)
       );
       state.bat.userData.baseRotation = state.bat.rotation.clone();
       state.bat.updateMatrixWorld(true);
@@ -982,13 +989,13 @@
       state.pitcher,
       "LeftHand",
       0.31,
-      new THREE.Vector3(-0.035, -0.160, 0.020)
+      CALIBRATED_GLOVE_OFFSET.clone()
     );
     if (gloveBone) {
       state.glove.rotation.set(
-        THREE.MathUtils.degToRad(55.0),
-        THREE.MathUtils.degToRad(-40.0),
-        THREE.MathUtils.degToRad(35.0)
+        THREE.MathUtils.degToRad(CALIBRATED_GLOVE_ROT.x),
+        THREE.MathUtils.degToRad(CALIBRATED_GLOVE_ROT.y),
+        THREE.MathUtils.degToRad(CALIBRATED_GLOVE_ROT.z)
       );
       state.glove.userData.baseRotation = state.glove.rotation.clone();
       state.glove.updateMatrixWorld(true);
@@ -1072,8 +1079,8 @@
     if (!obj || !obj.userData.attachBone) return;
 
     obj.userData.worldOffset = obj === state.bat
-      ? new THREE.Vector3(-0.535, 0.455, -0.145)
-      : new THREE.Vector3(-0.035, -0.160, 0.020);
+      ? CALIBRATED_BAT_OFFSET.clone()
+      : CALIBRATED_GLOVE_OFFSET.clone();
 
     setBoneLocalOffsetInWorldUnits(
       obj,
@@ -1083,15 +1090,15 @@
 
     if (obj === state.bat) {
       obj.rotation.set(
-        THREE.MathUtils.degToRad(12.9),
-        THREE.MathUtils.degToRad(-60.0),
-        THREE.MathUtils.degToRad(50.0)
+        THREE.MathUtils.degToRad(CALIBRATED_BAT_ROT.x),
+        THREE.MathUtils.degToRad(CALIBRATED_BAT_ROT.y),
+        THREE.MathUtils.degToRad(CALIBRATED_BAT_ROT.z)
       );
     } else if (obj === state.glove) {
       obj.rotation.set(
-        THREE.MathUtils.degToRad(55.0),
-        THREE.MathUtils.degToRad(-40.0),
-        THREE.MathUtils.degToRad(35.0)
+        THREE.MathUtils.degToRad(CALIBRATED_GLOVE_ROT.x),
+        THREE.MathUtils.degToRad(CALIBRATED_GLOVE_ROT.y),
+        THREE.MathUtils.degToRad(CALIBRATED_GLOVE_ROT.z)
       );
     } else if (obj.userData.baseRotation) {
       obj.rotation.copy(obj.userData.baseRotation);
@@ -1159,6 +1166,57 @@
   }
 
 
+
+  function ensureBallAttachedForEditing() {
+    if (!state.ball || !state.pitcherThrowHand) return false;
+
+    if (state.pitching || state.ballAirborne) {
+      state.pitching = false;
+      state.ballAirborne = false;
+      state.pitchReleased = false;
+      state.ballVelocity.set(0, 0, 0);
+    }
+
+    if (state.ball.parent !== state.pitcherThrowHand) {
+      attachBallToThrowingHand();
+    }
+    return true;
+  }
+
+  function moveBallHandOffset(dx, dy, dz) {
+    if (!ensureBallAttachedForEditing()) return;
+
+    BALL_HAND_OFFSET.x += dx;
+    BALL_HAND_OFFSET.y += dy;
+    BALL_HAND_OFFSET.z += dz;
+
+    setBoneLocalOffsetInWorldUnits(
+      state.ball,
+      state.pitcherThrowHand,
+      BALL_HAND_OFFSET
+    );
+
+    updateBallSizePanel();
+    setStatus(
+      "BALL 위치 " +
+      BALL_HAND_OFFSET.x.toFixed(3) + ", " +
+      BALL_HAND_OFFSET.y.toFixed(3) + ", " +
+      BALL_HAND_OFFSET.z.toFixed(3)
+    );
+  }
+
+  function resetBallHandOffset() {
+    BALL_HAND_OFFSET.set(0.038, -0.006, 0.012);
+    ensureBallAttachedForEditing();
+    setBoneLocalOffsetInWorldUnits(
+      state.ball,
+      state.pitcherThrowHand,
+      BALL_HAND_OFFSET
+    );
+    updateBallSizePanel();
+    setStatus("BALL 위치 초기화");
+  }
+
   function updateBallSizePanel() {
     const panel = document.getElementById("ballSizePanel");
     if (!panel) return;
@@ -1169,7 +1227,11 @@
       "표시 지름: " +
       (REAL_BALL_DIAMETER * BALL_VISUAL_SCALE * 100).toFixed(1) +
       "cm<br>" +
-      "Step: " + state.ballScaleStep.toFixed(2);
+      "Offset X: " + BALL_HAND_OFFSET.x.toFixed(3) + "m<br>" +
+      "Offset Y: " + BALL_HAND_OFFSET.y.toFixed(3) + "m<br>" +
+      "Offset Z: " + BALL_HAND_OFFSET.z.toFixed(3) + "m<br>" +
+      "크기 Step: " + state.ballScaleStep.toFixed(2) + "<br>" +
+      "위치 Step: " + state.ballMoveStep.toFixed(3) + "m";
   }
 
   function setBallVisualScale(value) {
@@ -1196,7 +1258,10 @@
       "BALL scale=" + BALL_VISUAL_SCALE.toFixed(3) +
       " diameter=" +
       (REAL_BALL_DIAMETER * BALL_VISUAL_SCALE * 100).toFixed(2) +
-      "cm";
+      "cm offset=(" +
+      BALL_HAND_OFFSET.x.toFixed(3) + "," +
+      BALL_HAND_OFFSET.y.toFixed(3) + "," +
+      BALL_HAND_OFFSET.z.toFixed(3) + ")";
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).catch(() => {});
@@ -1460,6 +1525,31 @@
       ballButton("1.00x", () => setBallVisualScale(1.00))
     );
     ballEditor.appendChild(ballControlRow);
+
+    const ballMoveStepRow = document.createElement("div");
+    ballMoveStepRow.appendChild(document.createTextNode("위치 변경량 "));
+    [0.005, 0.010, 0.050].forEach((v) => {
+      ballMoveStepRow.appendChild(
+        ballButton(v.toFixed(3), () => {
+          state.ballMoveStep = v;
+          updateBallSizePanel();
+        })
+      );
+    });
+    ballEditor.appendChild(ballMoveStepRow);
+
+    const ballMoveRow = document.createElement("div");
+    ballMoveRow.appendChild(ballButton("X−", () => moveBallHandOffset(-state.ballMoveStep,0,0)));
+    ballMoveRow.appendChild(ballButton("X+", () => moveBallHandOffset( state.ballMoveStep,0,0)));
+    ballMoveRow.appendChild(ballButton("Y−", () => moveBallHandOffset(0,-state.ballMoveStep,0)));
+    ballMoveRow.appendChild(ballButton("Y+", () => moveBallHandOffset(0, state.ballMoveStep,0)));
+    ballMoveRow.appendChild(ballButton("Z−", () => moveBallHandOffset(0,0,-state.ballMoveStep)));
+    ballMoveRow.appendChild(ballButton("Z+", () => moveBallHandOffset(0,0, state.ballMoveStep)));
+    ballEditor.appendChild(ballMoveRow);
+
+    const ballResetRow = document.createElement("div");
+    ballResetRow.appendChild(ballButton("공 위치 초기화", resetBallHandOffset));
+    ballEditor.appendChild(ballResetRow);
 
     const ballCopyRow = document.createElement("div");
     ballCopyRow.appendChild(ballButton("공 설정 복사", copyBallVisualScale));
