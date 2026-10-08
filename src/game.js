@@ -28,7 +28,7 @@
 
   // TEMP: bat / glove transform editor.
   const EQUIPMENT_EDIT_MODE = true;
-  const EQUIP_MOVE_STEPS = [0.005, 0.010, 0.050];
+  const EQUIP_MOVE_STEPS = [0.010, 0.050, 0.100];
   const EQUIP_ROT_STEPS = [1, 5, 15];
   const EQUIP_SCALE_STEPS = [0.01, 0.05, 0.10];
 
@@ -236,15 +236,18 @@
   }
 
   function setBoneLocalOffsetInWorldUnits(obj, bone, worldOffset) {
+    // Convert a WORLD-axis offset around the hand into the hand bone's
+    // local coordinates. The old version divided only by scale, so a rotated
+    // hand made the UI axes behave incorrectly / appear not to move.
     bone.updateMatrixWorld(true);
-    const ws = new THREE.Vector3();
-    bone.getWorldScale(ws);
 
-    obj.position.set(
-      worldOffset.x / Math.max(Math.abs(ws.x), 0.000001),
-      worldOffset.y / Math.max(Math.abs(ws.y), 0.000001),
-      worldOffset.z / Math.max(Math.abs(ws.z), 0.000001)
-    );
+    const boneWorld = new THREE.Vector3();
+    bone.getWorldPosition(boneWorld);
+
+    const targetWorld = boneWorld.clone().add(worldOffset);
+    const targetLocal = bone.worldToLocal(targetWorld.clone());
+
+    obj.position.copy(targetLocal);
     obj.updateMatrixWorld(true);
   }
 
@@ -1000,8 +1003,13 @@
   }
 
   function selectEquipment(obj) {
+    if (!obj) {
+      setStatus("장비 로드 안됨");
+      return;
+    }
     state.selectedEquipment = obj;
     updateEquipmentPanel();
+    setStatus(equipmentLabel(obj) + " 선택됨");
   }
 
   function moveEquipmentWorld(dx, dy, dz) {
@@ -1024,6 +1032,7 @@
     obj.rotation[axis] += THREE.MathUtils.degToRad(degrees);
     obj.updateMatrixWorld(true);
     updateEquipmentPanel();
+    setStatus(equipmentLabel(obj) + " 회전 " + axis.toUpperCase());
   }
 
   function scaleEquipment(delta) {
@@ -1038,6 +1047,33 @@
     obj.userData.equipmentScale = newValue;
     obj.updateMatrixWorld(true);
     updateEquipmentPanel();
+    setStatus(equipmentLabel(obj) + " 크기 " + newValue.toFixed(2) + "x");
+  }
+
+
+  function resetEquipmentTransform() {
+    const obj = state.selectedEquipment;
+    if (!obj || !obj.userData.attachBone) return;
+
+    obj.userData.worldOffset = obj === state.bat
+      ? new THREE.Vector3(0.035, 0.015, 0.015)
+      : new THREE.Vector3(0.015, 0.000, 0.020);
+
+    setBoneLocalOffsetInWorldUnits(
+      obj,
+      obj.userData.attachBone,
+      obj.userData.worldOffset
+    );
+
+    if (obj.userData.baseRotation) obj.rotation.copy(obj.userData.baseRotation);
+
+    const oldValue = obj.userData.equipmentScale || 1;
+    if (Math.abs(oldValue) > 0.00001) obj.scale.multiplyScalar(1 / oldValue);
+    obj.userData.equipmentScale = 1.0;
+    obj.updateMatrixWorld(true);
+
+    updateEquipmentPanel();
+    setStatus(equipmentLabel(obj) + " 초기화");
   }
 
   function copyEquipmentTransform() {
@@ -1216,6 +1252,16 @@
   $("resetBtn").onclick = resetBall;
 
   addEventListener("keydown", (e) => {
+    if (EQUIPMENT_EDIT_MODE && state.selectedEquipment) {
+      // J/L = X, I/K = Z, U/O = Y
+      if (e.code === "KeyJ") { e.preventDefault(); moveEquipmentWorld(-state.equipMoveStep,0,0); return; }
+      if (e.code === "KeyL") { e.preventDefault(); moveEquipmentWorld( state.equipMoveStep,0,0); return; }
+      if (e.code === "KeyI") { e.preventDefault(); moveEquipmentWorld(0,0,-state.equipMoveStep); return; }
+      if (e.code === "KeyK") { e.preventDefault(); moveEquipmentWorld(0,0, state.equipMoveStep); return; }
+      if (e.code === "KeyU") { e.preventDefault(); moveEquipmentWorld(0,-state.equipMoveStep,0); return; }
+      if (e.code === "KeyO") { e.preventDefault(); moveEquipmentWorld(0, state.equipMoveStep,0); return; }
+    }
+
     if (POSITION_EDIT_MODE && state.selectedActor) {
       const step = getEditStep(e);
 
@@ -1273,6 +1319,10 @@
     equipEditor.style.borderTop = "1px solid rgba(255,255,255,.18)";
     equipEditor.style.fontSize = "11px";
     equipEditor.style.lineHeight = "1.35";
+    equipEditor.style.pointerEvents = "auto";
+    equipEditor.style.position = "relative";
+    equipEditor.style.zIndex = "9999";
+    document.getElementById("hud").style.pointerEvents = "auto";
     document.getElementById("hud").appendChild(equipEditor);
 
     const equipTitle = document.createElement("div");
@@ -1282,10 +1332,13 @@
 
     function equipButton(label, fn) {
       const b = document.createElement("button");
+      b.type = "button";
       b.textContent = label;
       b.style.fontSize = "10px";
       b.style.padding = "4px 6px";
       b.style.margin = "2px 2px 2px 0";
+      b.style.pointerEvents = "auto";
+      b.style.cursor = "pointer";
       b.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1372,6 +1425,7 @@
     equipEditor.appendChild(releaseRow);
 
     const copyRow = document.createElement("div");
+    copyRow.appendChild(equipButton("초기화", resetEquipmentTransform));
     copyRow.appendChild(equipButton("설정 복사", copyEquipmentTransform));
     equipEditor.appendChild(copyRow);
 
