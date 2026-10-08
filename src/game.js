@@ -23,8 +23,8 @@
   // Pitch animation sync tuning.
   // The ball stays attached to the throwing hand until this normalized
   // animation time, then detaches from the exact hand world position.
-  const PITCH_RELEASE_NORM = 0.58;
-  const BALL_HAND_OFFSET = new THREE.Vector3(0.028, 0.018, 0.020);
+  const PITCH_RELEASE_NORM = 0.43;
+  const BALL_HAND_OFFSET = new THREE.Vector3(0.038, -0.006, 0.012);
 
   const FIELD_FILE_NOTE = "현재 Baseball Field.fbx = 단순 잔디/흙 필드 모델";
   const scene = new THREE.Scene();
@@ -212,16 +212,51 @@
     return found;
   }
 
-  function attachProp(prop, actor, boneName) {
+  function fitAttachedWorldSize(obj, targetSize) {
+    obj.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const current = Math.max(size.x, size.y, size.z);
+
+    if (current > 0.000001) {
+      obj.scale.multiplyScalar(targetSize / current);
+      obj.updateMatrixWorld(true);
+    }
+  }
+
+  function setBoneLocalOffsetInWorldUnits(obj, bone, worldOffset) {
+    bone.updateMatrixWorld(true);
+    const ws = new THREE.Vector3();
+    bone.getWorldScale(ws);
+
+    obj.position.set(
+      worldOffset.x / Math.max(Math.abs(ws.x), 0.000001),
+      worldOffset.y / Math.max(Math.abs(ws.y), 0.000001),
+      worldOffset.z / Math.max(Math.abs(ws.z), 0.000001)
+    );
+    obj.updateMatrixWorld(true);
+  }
+
+  function attachProp(prop, actor, boneName, targetWorldSize, worldOffset) {
     const bone = findBone(actor, boneName);
     if (!bone) {
       console.warn("bone not found:", boneName);
-      return false;
+      return null;
     }
+
     bone.add(prop);
     prop.position.set(0, 0, 0);
     prop.rotation.set(0, 0, 0);
-    return true;
+    prop.updateMatrixWorld(true);
+
+    // Props were being scaled before parenting. The player root itself is
+    // heavily scaled down from FBX centimeters, so that made the props almost
+    // microscopic once attached. Size them AFTER parenting in world units.
+    fitAttachedWorldSize(prop, targetWorldSize);
+
+    if (worldOffset) setBoneLocalOffsetInWorldUnits(prop, bone, worldOffset);
+    return bone;
   }
 
 
@@ -230,37 +265,45 @@
     if (!state.ball || !state.pitcherThrowHand) return;
 
     state.pitcherThrowHand.add(state.ball);
-    state.ball.position.copy(BALL_HAND_OFFSET);
+    state.ball.position.set(0, 0, 0);
     state.ball.rotation.set(0, 0, 0);
-    state.ball.scale.setScalar(1);
+    state.ball.scale.set(1, 1, 1);
     state.ball.updateMatrixWorld(true);
+
+    // Baseball diameter ~7.4 cm in world space. This compensation is crucial:
+    // otherwise the player's FBX root scale also shrinks the ball to a dot.
+    fitAttachedWorldSize(state.ball, 0.074);
+    setBoneLocalOffsetInWorldUnits(
+      state.ball,
+      state.pitcherThrowHand,
+      BALL_HAND_OFFSET
+    );
+
     state.pitchReleased = false;
   }
 
   function releaseBallFromThrowingHand() {
     if (!state.ball || !state.pitcherThrowHand || state.pitchReleased) return;
 
-    // Preserve the exact world-space hand position at the release frame.
+    // scene.attach preserves the ball's world position, rotation AND scale.
+    // So it does not suddenly change size when leaving the scaled hand rig.
+    scene.attach(state.ball);
+    state.ball.updateMatrixWorld(true);
+
     const worldPos = new THREE.Vector3();
     state.ball.getWorldPosition(worldPos);
-
-    scene.add(state.ball);
     state.ball.position.copy(worldPos);
-    state.ball.rotation.set(0, 0, 0);
-    state.ball.updateMatrixWorld(true);
 
     state.pitchStart.copy(worldPos);
     state.pitchReleased = true;
     state.pitchT = 0;
 
-    // Aim to the strike-zone target from the actual hand release point.
     const travel = 0.46;
     state.ballVelocity
       .copy(state.pitchEnd)
       .sub(worldPos)
       .multiplyScalar(1 / travel);
 
-    // Slight upward compensation so gravity still lands in the target area.
     state.ballVelocity.y += 0.5 * 9.81 * travel;
   }
 
@@ -775,6 +818,7 @@
   setGameplayCamera();
 
   state.pitcherThrowHand = findBone(state.pitcher, "RightHand");
+  console.log("Throw hand:", state.pitcherThrowHand ? state.pitcherThrowHand.name : "NOT FOUND");
 
   state.batterMixer = new THREE.AnimationMixer(state.batter);
   state.pitcherMixer = new THREE.AnimationMixer(state.pitcher);
@@ -846,8 +890,6 @@
   // Bat
   try {
     state.bat = parseFBX("bat");
-    scaleToSize(state.bat, 0.94);
-
     const albedo = A.batAlbedo
       ? textureLoader.load("data:image/png;base64," + A.batAlbedo)
       : null;
@@ -865,19 +907,24 @@
 
     state.bat.traverse((o) => {
       if (!o.isMesh) return;
-      o.material = new THREE.MeshStandardMaterial({
+      o.material = new THREE.MeshBasicMaterial({
         map: albedo,
-        normalMap: normal,
-        metalnessMap: metal,
-        roughnessMap: rough,
-        metalness: metal ? 1 : 0.05,
-        roughness: rough ? 1 : 0.45
+        color: albedo ? 0xffffff : 0x9a6b3f,
+        side: THREE.DoubleSide
       });
     });
 
-    if (attachProp(state.bat, state.batter, "RightHand")) {
+    const batBone = attachProp(
+      state.bat,
+      state.batter,
+      "RightHand",
+      0.88,
+      new THREE.Vector3(0.035, 0.015, 0.015)
+    );
+    if (batBone) {
       state.bat.rotation.set(0.05, Math.PI / 2, Math.PI / 2);
-      state.bat.position.set(0.03, 0.01, 0);
+      state.bat.updateMatrixWorld(true);
+      console.log("BAT attached:", batBone.name);
     }
   } catch (e) {
     console.warn("bat load failed", e);
@@ -886,10 +933,30 @@
   // Glove
   try {
     state.glove = parseFBX("glove");
-    scaleToSize(state.glove, 0.30);
-    if (attachProp(state.glove, state.pitcher, "LeftHand")) {
-      state.glove.position.set(0.018, 0.015, 0.010);
+    state.glove.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      const converted = mats.map((m) => new THREE.MeshBasicMaterial({
+        map: m.map || null,
+        color: m.map ? 0xffffff : (m.color ? m.color.clone() : new THREE.Color(0x8b5a2b)),
+        transparent: !!m.transparent,
+        opacity: m.opacity == null ? 1 : m.opacity,
+        side: THREE.DoubleSide
+      }));
+      o.material = Array.isArray(o.material) ? converted : converted[0];
+    });
+
+    const gloveBone = attachProp(
+      state.glove,
+      state.pitcher,
+      "LeftHand",
+      0.31,
+      new THREE.Vector3(0.015, 0.000, 0.020)
+    );
+    if (gloveBone) {
       state.glove.rotation.set(0, 0, 0);
+      state.glove.updateMatrixWorld(true);
+      console.log("GLOVE attached:", gloveBone.name);
     }
   } catch (e) {
     console.warn("glove load failed", e);
