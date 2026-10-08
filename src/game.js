@@ -28,6 +28,13 @@
 
   // TEMP: bat / glove transform editor.
   const EQUIPMENT_EDIT_MODE = false;
+
+  // TEMP: ball visual-size editor.
+  const BALL_EDIT_MODE = true;
+  const REAL_BALL_DIAMETER = 0.074; // 7.4 cm
+  let BALL_VISUAL_SCALE = 1.00;
+  const BALL_SCALE_STEPS = [0.05, 0.10, 0.25];
+
   const EQUIP_MOVE_STEPS = [0.010, 0.050, 0.100];
   const EQUIP_ROT_STEPS = [1, 5, 15];
   const EQUIP_SCALE_STEPS = [0.01, 0.05, 0.10];
@@ -117,7 +124,8 @@
     selectedEquipment: null,
     equipMoveStep: 0.010,
     equipRotStep: 5,
-    equipScaleStep: 0.05
+    equipScaleStep: 0.05,
+    ballScaleStep: 0.10
   };
 
   function b64ToBuffer(b64) {
@@ -290,7 +298,7 @@
 
     // Baseball diameter ~7.4 cm in world space. This compensation is crucial:
     // otherwise the player's FBX root scale also shrinks the ball to a dot.
-    fitAttachedWorldSize(state.ball, 0.074);
+    fitAttachedWorldSize(state.ball, REAL_BALL_DIAMETER * BALL_VISUAL_SCALE);
     setBoneLocalOffsetInWorldUnits(
       state.ball,
       state.pitcherThrowHand,
@@ -1150,6 +1158,52 @@
       "Release: " + PITCH_RELEASE_NORM.toFixed(2);
   }
 
+
+  function updateBallSizePanel() {
+    const panel = document.getElementById("ballSizePanel");
+    if (!panel) return;
+
+    panel.innerHTML =
+      "<b>공 크기 조정</b><br>" +
+      "Scale: " + BALL_VISUAL_SCALE.toFixed(2) + "x<br>" +
+      "표시 지름: " +
+      (REAL_BALL_DIAMETER * BALL_VISUAL_SCALE * 100).toFixed(1) +
+      "cm<br>" +
+      "Step: " + state.ballScaleStep.toFixed(2);
+  }
+
+  function setBallVisualScale(value) {
+    BALL_VISUAL_SCALE = Math.max(0.25, Math.min(5.00, value));
+
+    if (state.ball) {
+      // Works whether the ball is attached to the hand or already in scene.
+      fitAttachedWorldSize(
+        state.ball,
+        REAL_BALL_DIAMETER * BALL_VISUAL_SCALE
+      );
+    }
+
+    updateBallSizePanel();
+    setStatus("BALL 크기 " + BALL_VISUAL_SCALE.toFixed(2) + "x");
+  }
+
+  function changeBallVisualScale(delta) {
+    setBallVisualScale(BALL_VISUAL_SCALE + delta);
+  }
+
+  function copyBallVisualScale() {
+    const text =
+      "BALL scale=" + BALL_VISUAL_SCALE.toFixed(3) +
+      " diameter=" +
+      (REAL_BALL_DIAMETER * BALL_VISUAL_SCALE * 100).toFixed(2) +
+      "cm";
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    setStatus(text);
+  }
+
   function resetBall() {
     state.pitching = false;
     state.hit = false;
@@ -1274,6 +1328,19 @@
   $("resetBtn").onclick = resetBall;
 
   addEventListener("keydown", (e) => {
+    if (BALL_EDIT_MODE) {
+      if (e.code === "Comma") {
+        e.preventDefault();
+        changeBallVisualScale(-state.ballScaleStep);
+        return;
+      }
+      if (e.code === "Period") {
+        e.preventDefault();
+        changeBallVisualScale(state.ballScaleStep);
+        return;
+      }
+    }
+
     if (EQUIPMENT_EDIT_MODE && state.selectedEquipment) {
       // J/L = X, I/K = Z, U/O = Y
       if (e.code === "KeyJ") { e.preventDefault(); moveEquipmentWorld(-state.equipMoveStep,0,0); return; }
@@ -1332,6 +1399,82 @@
   document.getElementById("hud").appendChild(perf);
 
 
+
+
+  if (BALL_EDIT_MODE) {
+    const ballEditor = document.createElement("div");
+    ballEditor.id = "ballSizeEditorUI";
+    ballEditor.style.marginTop = "8px";
+    ballEditor.style.paddingTop = "8px";
+    ballEditor.style.borderTop = "1px solid rgba(255,255,255,.18)";
+    ballEditor.style.fontSize = "11px";
+    ballEditor.style.lineHeight = "1.35";
+    ballEditor.style.pointerEvents = "auto";
+    ballEditor.style.position = "relative";
+    ballEditor.style.zIndex = "9999";
+    document.getElementById("hud").style.pointerEvents = "auto";
+    document.getElementById("hud").appendChild(ballEditor);
+
+    function ballButton(label, fn) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      b.style.fontSize = "10px";
+      b.style.padding = "4px 6px";
+      b.style.margin = "2px 2px 2px 0";
+      b.style.pointerEvents = "auto";
+      b.style.cursor = "pointer";
+      b.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        fn();
+      };
+      return b;
+    }
+
+    const ballTitle = document.createElement("div");
+    ballTitle.innerHTML = "<b>공 크기 조정</b>";
+    ballTitle.style.marginBottom = "5px";
+    ballEditor.appendChild(ballTitle);
+
+    const ballStepRow = document.createElement("div");
+    ballStepRow.appendChild(document.createTextNode("변경량 "));
+    BALL_SCALE_STEPS.forEach((v) => {
+      ballStepRow.appendChild(
+        ballButton(v.toFixed(2), () => {
+          state.ballScaleStep = v;
+          updateBallSizePanel();
+        })
+      );
+    });
+    ballEditor.appendChild(ballStepRow);
+
+    const ballControlRow = document.createElement("div");
+    ballControlRow.appendChild(
+      ballButton("공 작게", () => changeBallVisualScale(-state.ballScaleStep))
+    );
+    ballControlRow.appendChild(
+      ballButton("공 크게", () => changeBallVisualScale(state.ballScaleStep))
+    );
+    ballControlRow.appendChild(
+      ballButton("1.00x", () => setBallVisualScale(1.00))
+    );
+    ballEditor.appendChild(ballControlRow);
+
+    const ballCopyRow = document.createElement("div");
+    ballCopyRow.appendChild(ballButton("공 설정 복사", copyBallVisualScale));
+    ballEditor.appendChild(ballCopyRow);
+
+    const ballPanel = document.createElement("div");
+    ballPanel.id = "ballSizePanel";
+    ballPanel.style.marginTop = "5px";
+    ballPanel.style.padding = "5px";
+    ballPanel.style.background = "rgba(255,255,255,.08)";
+    ballPanel.style.borderRadius = "6px";
+    ballEditor.appendChild(ballPanel);
+
+    updateBallSizePanel();
+  }
 
   if (EQUIPMENT_EDIT_MODE) {
     const equipEditor = document.createElement("div");
