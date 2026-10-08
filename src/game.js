@@ -23,11 +23,11 @@
   // Pitch animation sync tuning.
   // The ball stays attached to the throwing hand until this normalized
   // animation time, then detaches from the exact hand world position.
-  let PITCH_RELEASE_NORM = 0.43;
+  let PITCH_RELEASE_NORM = 0.38;
   const BALL_HAND_OFFSET = new THREE.Vector3(0.038, -0.006, 0.012);
 
   // TEMP: bat / glove transform editor.
-  const EQUIPMENT_EDIT_MODE = true;
+  const EQUIPMENT_EDIT_MODE = false;
   const EQUIP_MOVE_STEPS = [0.010, 0.050, 0.100];
   const EQUIP_ROT_STEPS = [1, 5, 15];
   const EQUIP_SCALE_STEPS = [0.01, 0.05, 0.10];
@@ -937,10 +937,14 @@
       state.batter,
       "RightHand",
       0.88,
-      new THREE.Vector3(0.035, 0.015, 0.015)
+      new THREE.Vector3(-0.535, 0.455, -0.145)
     );
     if (batBone) {
-      state.bat.rotation.set(0.05, Math.PI / 2, Math.PI / 2);
+      state.bat.rotation.set(
+        THREE.MathUtils.degToRad(12.9),
+        THREE.MathUtils.degToRad(-60.0),
+        THREE.MathUtils.degToRad(50.0)
+      );
       state.bat.userData.baseRotation = state.bat.rotation.clone();
       state.bat.updateMatrixWorld(true);
       console.log("BAT attached:", batBone.name);
@@ -970,10 +974,14 @@
       state.pitcher,
       "LeftHand",
       0.31,
-      new THREE.Vector3(0.015, 0.000, 0.020)
+      new THREE.Vector3(-0.035, -0.160, 0.020)
     );
     if (gloveBone) {
-      state.glove.rotation.set(0, 0, 0);
+      state.glove.rotation.set(
+        THREE.MathUtils.degToRad(55.0),
+        THREE.MathUtils.degToRad(-40.0),
+        THREE.MathUtils.degToRad(35.0)
+      );
       state.glove.userData.baseRotation = state.glove.rotation.clone();
       state.glove.updateMatrixWorld(true);
       console.log("GLOVE attached:", gloveBone.name);
@@ -1056,8 +1064,8 @@
     if (!obj || !obj.userData.attachBone) return;
 
     obj.userData.worldOffset = obj === state.bat
-      ? new THREE.Vector3(0.035, 0.015, 0.015)
-      : new THREE.Vector3(0.015, 0.000, 0.020);
+      ? new THREE.Vector3(-0.535, 0.455, -0.145)
+      : new THREE.Vector3(-0.035, -0.160, 0.020);
 
     setBoneLocalOffsetInWorldUnits(
       obj,
@@ -1065,7 +1073,21 @@
       obj.userData.worldOffset
     );
 
-    if (obj.userData.baseRotation) obj.rotation.copy(obj.userData.baseRotation);
+    if (obj === state.bat) {
+      obj.rotation.set(
+        THREE.MathUtils.degToRad(12.9),
+        THREE.MathUtils.degToRad(-60.0),
+        THREE.MathUtils.degToRad(50.0)
+      );
+    } else if (obj === state.glove) {
+      obj.rotation.set(
+        THREE.MathUtils.degToRad(55.0),
+        THREE.MathUtils.degToRad(-40.0),
+        THREE.MathUtils.degToRad(35.0)
+      );
+    } else if (obj.userData.baseRotation) {
+      obj.rotation.copy(obj.userData.baseRotation);
+    }
 
     const oldValue = obj.userData.equipmentScale || 1;
     if (Math.abs(oldValue) > 0.00001) obj.scale.multiplyScalar(1 / oldValue);
