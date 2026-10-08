@@ -287,6 +287,7 @@
 
     prop.userData.attachBone = bone;
     prop.userData.worldOffset = worldOffset ? worldOffset.clone() : new THREE.Vector3();
+    prop.userData.localAttachPosition = prop.position.clone();
     prop.userData.baseWorldSize = targetWorldSize || 1;
     prop.userData.equipmentScale = 1.0;
     return bone;
@@ -866,6 +867,12 @@
   if (batterIdleClip) {
     state.batterIdle = state.batterMixer.clipAction(batterIdleClip);
     state.batterIdle.play();
+
+    // IMPORTANT: evaluate exactly frame 0 before any equipment is attached.
+    // This makes hand-bone transforms deterministic across reloads.
+    state.batterIdle.time = 0;
+    state.batterMixer.update(0);
+    state.batter.updateMatrixWorld(true);
   }
 
   // Pitcher idle = first frame of Pitch Right, frozen.
@@ -961,8 +968,14 @@
         THREE.MathUtils.degToRad(CALIBRATED_BAT_ROT.z)
       );
       state.bat.userData.baseRotation = state.bat.rotation.clone();
+      state.bat.userData.localAttachPosition = state.bat.position.clone();
       state.bat.updateMatrixWorld(true);
-      console.log("BAT attached:", batBone.name);
+      console.log(
+        "BAT attached:",
+        batBone.name,
+        "local=",
+        state.bat.userData.localAttachPosition
+      );
     }
   } catch (e) {
     console.warn("bat load failed", e);
@@ -1030,6 +1043,25 @@
       setStatus("장비 로드 안됨");
       return;
     }
+
+    if (obj === state.bat && state.batterIdle && state.batterMixer) {
+      state.batterIdle.paused = false;
+      state.batterIdle.time = 0;
+      state.batterMixer.update(0);
+      state.batterIdle.paused = true;
+      state.batter.updateMatrixWorld(true);
+
+      // Re-apply the saved offset against the exact same frame used on startup.
+      if (obj.userData.attachBone && obj.userData.worldOffset) {
+        setBoneLocalOffsetInWorldUnits(
+          obj,
+          obj.userData.attachBone,
+          obj.userData.worldOffset
+        );
+        obj.userData.localAttachPosition = obj.position.clone();
+      }
+    }
+
     state.selectedEquipment = obj;
     updateEquipmentPanel();
     setStatus(equipmentLabel(obj) + " 선택됨");
@@ -1821,6 +1853,12 @@
     accumulator = 0;
 
     if (state.swingWindow > 0) state.swingWindow -= dt;
+
+    // In normal gameplay the idle must keep running.
+    if (!EQUIPMENT_EDIT_MODE && state.batterIdle) {
+      state.batterIdle.paused = false;
+    }
+
     if (state.batterMixer) state.batterMixer.update(dt);
     if (state.pitcherMixer) state.pitcherMixer.update(dt);
     updateBall(dt);
