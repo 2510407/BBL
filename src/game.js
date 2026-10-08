@@ -27,7 +27,7 @@
   const BALL_HAND_OFFSET = new THREE.Vector3(-0.012, -0.176, 0.002);
 
   // TEMP: bat / glove transform editor.
-  const EQUIPMENT_EDIT_MODE = false;
+  const EQUIPMENT_EDIT_MODE = true;
 
   // TEMP: ball visual-size editor.
   const BALL_EDIT_MODE = false;
@@ -35,11 +35,11 @@
   let BALL_VISUAL_SCALE = 3.600;
   const BALL_SCALE_STEPS = [0.05, 0.10, 0.25];
 
-  const EQUIP_MOVE_STEPS = [0.010, 0.050, 0.100];
+  const EQUIP_MOVE_STEPS = [0.005, 0.010, 0.050];
   const EQUIP_ROT_STEPS = [1, 5, 15];
   const EQUIP_SCALE_STEPS = [0.01, 0.05, 0.10];
 
-  const CALIBRATED_BAT_OFFSET = new THREE.Vector3(-0.535, 0.465, -0.145);
+  const CALIBRATED_BAT_OFFSET = new THREE.Vector3(0.000, 0.000, 0.000);
   const CALIBRATED_BAT_ROT = new THREE.Vector3(12.9, -60.0, 50.0);
 
   const CALIBRATED_GLOVE_OFFSET = new THREE.Vector3(-0.035, -0.160, 0.020);
@@ -1184,6 +1184,7 @@
     const r = obj.rotation;
     panel.innerHTML =
       "<b>" + equipmentLabel(obj) + "</b><br>" +
+      (obj === state.bat ? "<span style='opacity:.75'>손 기준 안정화 좌표</span><br>" : "") +
       "Offset X: " + o.x.toFixed(3) + "m<br>" +
       "Offset Y: " + o.y.toFixed(3) + "m<br>" +
       "Offset Z: " + o.z.toFixed(3) + "m<br>" +
