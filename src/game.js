@@ -23,8 +23,14 @@
   // Pitch animation sync tuning.
   // The ball stays attached to the throwing hand until this normalized
   // animation time, then detaches from the exact hand world position.
-  const PITCH_RELEASE_NORM = 0.43;
+  let PITCH_RELEASE_NORM = 0.43;
   const BALL_HAND_OFFSET = new THREE.Vector3(0.038, -0.006, 0.012);
+
+  // TEMP: bat / glove transform editor.
+  const EQUIPMENT_EDIT_MODE = true;
+  const EQUIP_MOVE_STEPS = [0.005, 0.010, 0.050];
+  const EQUIP_ROT_STEPS = [1, 5, 15];
+  const EQUIP_SCALE_STEPS = [0.01, 0.05, 0.10];
 
   const FIELD_FILE_NOTE = "현재 Baseball Field.fbx = 단순 잔디/흙 필드 모델";
   const scene = new THREE.Scene();
@@ -107,7 +113,11 @@
     selectedActor: null,
     selectionHelper: null,
     editStep: MOVE_STEP,
-    scaleStep: 0.05
+    scaleStep: 0.05,
+    selectedEquipment: null,
+    equipMoveStep: 0.010,
+    equipRotStep: 5,
+    equipScaleStep: 0.05
   };
 
   function b64ToBuffer(b64) {
@@ -256,6 +266,11 @@
     fitAttachedWorldSize(prop, targetWorldSize);
 
     if (worldOffset) setBoneLocalOffsetInWorldUnits(prop, bone, worldOffset);
+
+    prop.userData.attachBone = bone;
+    prop.userData.worldOffset = worldOffset ? worldOffset.clone() : new THREE.Vector3();
+    prop.userData.baseWorldSize = targetWorldSize || 1;
+    prop.userData.equipmentScale = 1.0;
     return bone;
   }
 
@@ -923,6 +938,7 @@
     );
     if (batBone) {
       state.bat.rotation.set(0.05, Math.PI / 2, Math.PI / 2);
+      state.bat.userData.baseRotation = state.bat.rotation.clone();
       state.bat.updateMatrixWorld(true);
       console.log("BAT attached:", batBone.name);
     }
@@ -955,6 +971,7 @@
     );
     if (gloveBone) {
       state.glove.rotation.set(0, 0, 0);
+      state.glove.userData.baseRotation = state.glove.rotation.clone();
       state.glove.updateMatrixWorld(true);
       console.log("GLOVE attached:", gloveBone.name);
     }
@@ -973,6 +990,106 @@
   } else {
     scene.add(state.ball);
     state.ball.position.copy(state.pitchStart);
+  }
+
+
+  function equipmentLabel(obj) {
+    if (obj === state.bat) return "BAT";
+    if (obj === state.glove) return "GLOVE";
+    return "NONE";
+  }
+
+  function selectEquipment(obj) {
+    state.selectedEquipment = obj;
+    updateEquipmentPanel();
+  }
+
+  function moveEquipmentWorld(dx, dy, dz) {
+    const obj = state.selectedEquipment;
+    if (!obj || !obj.userData.attachBone) return;
+
+    if (!obj.userData.worldOffset) obj.userData.worldOffset = new THREE.Vector3();
+    obj.userData.worldOffset.add(new THREE.Vector3(dx, dy, dz));
+    setBoneLocalOffsetInWorldUnits(
+      obj,
+      obj.userData.attachBone,
+      obj.userData.worldOffset
+    );
+    updateEquipmentPanel();
+  }
+
+  function rotateEquipment(axis, degrees) {
+    const obj = state.selectedEquipment;
+    if (!obj) return;
+    obj.rotation[axis] += THREE.MathUtils.degToRad(degrees);
+    obj.updateMatrixWorld(true);
+    updateEquipmentPanel();
+  }
+
+  function scaleEquipment(delta) {
+    const obj = state.selectedEquipment;
+    if (!obj) return;
+
+    const oldValue = obj.userData.equipmentScale || 1;
+    const newValue = Math.max(0.15, Math.min(3.0, oldValue + delta));
+    const factor = newValue / oldValue;
+
+    obj.scale.multiplyScalar(factor);
+    obj.userData.equipmentScale = newValue;
+    obj.updateMatrixWorld(true);
+    updateEquipmentPanel();
+  }
+
+  function copyEquipmentTransform() {
+    const obj = state.selectedEquipment;
+    if (!obj) return;
+
+    const o = obj.userData.worldOffset || new THREE.Vector3();
+    const r = obj.rotation;
+    const text =
+      equipmentLabel(obj) +
+      " offset=(" +
+      o.x.toFixed(3) + "," +
+      o.y.toFixed(3) + "," +
+      o.z.toFixed(3) + ")" +
+      " rot=(" +
+      THREE.MathUtils.radToDeg(r.x).toFixed(1) + "," +
+      THREE.MathUtils.radToDeg(r.y).toFixed(1) + "," +
+      THREE.MathUtils.radToDeg(r.z).toFixed(1) + ")" +
+      " scale=" + (obj.userData.equipmentScale || 1).toFixed(3) +
+      " release=" + PITCH_RELEASE_NORM.toFixed(2);
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    setStatus(text);
+  }
+
+  function updateEquipmentPanel() {
+    const panel = document.getElementById("equipmentCoordPanel");
+    if (!panel) return;
+
+    const obj = state.selectedEquipment;
+    if (!obj) {
+      panel.innerHTML = "<b>장비 선택</b><br>배트 또는 글러브를 선택하세요.";
+      return;
+    }
+
+    const o = obj.userData.worldOffset || new THREE.Vector3();
+    const r = obj.rotation;
+    panel.innerHTML =
+      "<b>" + equipmentLabel(obj) + "</b><br>" +
+      "Offset X: " + o.x.toFixed(3) + "m<br>" +
+      "Offset Y: " + o.y.toFixed(3) + "m<br>" +
+      "Offset Z: " + o.z.toFixed(3) + "m<br>" +
+      "Rot X: " + THREE.MathUtils.radToDeg(r.x).toFixed(1) + "°<br>" +
+      "Rot Y: " + THREE.MathUtils.radToDeg(r.y).toFixed(1) + "°<br>" +
+      "Rot Z: " + THREE.MathUtils.radToDeg(r.z).toFixed(1) + "°<br>" +
+      "Scale: " + (obj.userData.equipmentScale || 1).toFixed(2) + "x<br>" +
+      "Move: " + state.equipMoveStep.toFixed(3) + "m · " +
+      "Rotate: " + state.equipRotStep.toFixed(0) + "° · " +
+      "ScaleStep: " + state.equipScaleStep.toFixed(2) + "<br>" +
+      "Release: " + PITCH_RELEASE_NORM.toFixed(2);
   }
 
   function resetBall() {
@@ -1146,6 +1263,128 @@
   perf.textContent = "성능 모드";
   document.getElementById("hud").appendChild(perf);
 
+
+
+  if (EQUIPMENT_EDIT_MODE) {
+    const equipEditor = document.createElement("div");
+    equipEditor.id = "equipmentEditorUI";
+    equipEditor.style.marginTop = "8px";
+    equipEditor.style.paddingTop = "8px";
+    equipEditor.style.borderTop = "1px solid rgba(255,255,255,.18)";
+    equipEditor.style.fontSize = "11px";
+    equipEditor.style.lineHeight = "1.35";
+    document.getElementById("hud").appendChild(equipEditor);
+
+    const equipTitle = document.createElement("div");
+    equipTitle.innerHTML = "<b>장비 조정</b>";
+    equipTitle.style.marginBottom = "5px";
+    equipEditor.appendChild(equipTitle);
+
+    function equipButton(label, fn) {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.fontSize = "10px";
+      b.style.padding = "4px 6px";
+      b.style.margin = "2px 2px 2px 0";
+      b.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        fn();
+      };
+      return b;
+    }
+
+    const selectRow = document.createElement("div");
+    selectRow.appendChild(equipButton("배트", () => selectEquipment(state.bat)));
+    selectRow.appendChild(equipButton("글러브", () => selectEquipment(state.glove)));
+    equipEditor.appendChild(selectRow);
+
+    const moveStepRow = document.createElement("div");
+    moveStepRow.appendChild(document.createTextNode("이동 "));
+    EQUIP_MOVE_STEPS.forEach((v) => {
+      moveStepRow.appendChild(
+        equipButton(v.toFixed(3), () => {
+          state.equipMoveStep = v;
+          updateEquipmentPanel();
+        })
+      );
+    });
+    equipEditor.appendChild(moveStepRow);
+
+    const moveRow = document.createElement("div");
+    moveRow.appendChild(equipButton("X−", () => moveEquipmentWorld(-state.equipMoveStep,0,0)));
+    moveRow.appendChild(equipButton("X+", () => moveEquipmentWorld( state.equipMoveStep,0,0)));
+    moveRow.appendChild(equipButton("Y−", () => moveEquipmentWorld(0,-state.equipMoveStep,0)));
+    moveRow.appendChild(equipButton("Y+", () => moveEquipmentWorld(0, state.equipMoveStep,0)));
+    moveRow.appendChild(equipButton("Z−", () => moveEquipmentWorld(0,0,-state.equipMoveStep)));
+    moveRow.appendChild(equipButton("Z+", () => moveEquipmentWorld(0,0, state.equipMoveStep)));
+    equipEditor.appendChild(moveRow);
+
+    const rotStepRow = document.createElement("div");
+    rotStepRow.appendChild(document.createTextNode("회전 "));
+    EQUIP_ROT_STEPS.forEach((v) => {
+      rotStepRow.appendChild(
+        equipButton(v + "°", () => {
+          state.equipRotStep = v;
+          updateEquipmentPanel();
+        })
+      );
+    });
+    equipEditor.appendChild(rotStepRow);
+
+    const rotRow = document.createElement("div");
+    rotRow.appendChild(equipButton("RX−", () => rotateEquipment("x",-state.equipRotStep)));
+    rotRow.appendChild(equipButton("RX+", () => rotateEquipment("x", state.equipRotStep)));
+    rotRow.appendChild(equipButton("RY−", () => rotateEquipment("y",-state.equipRotStep)));
+    rotRow.appendChild(equipButton("RY+", () => rotateEquipment("y", state.equipRotStep)));
+    rotRow.appendChild(equipButton("RZ−", () => rotateEquipment("z",-state.equipRotStep)));
+    rotRow.appendChild(equipButton("RZ+", () => rotateEquipment("z", state.equipRotStep)));
+    equipEditor.appendChild(rotRow);
+
+    const scaleStepRow = document.createElement("div");
+    scaleStepRow.appendChild(document.createTextNode("크기 "));
+    EQUIP_SCALE_STEPS.forEach((v) => {
+      scaleStepRow.appendChild(
+        equipButton(v.toFixed(2), () => {
+          state.equipScaleStep = v;
+          updateEquipmentPanel();
+        })
+      );
+    });
+    equipEditor.appendChild(scaleStepRow);
+
+    const scaleRow = document.createElement("div");
+    scaleRow.appendChild(equipButton("크기−", () => scaleEquipment(-state.equipScaleStep)));
+    scaleRow.appendChild(equipButton("크기+", () => scaleEquipment( state.equipScaleStep)));
+    equipEditor.appendChild(scaleRow);
+
+    const releaseRow = document.createElement("div");
+    releaseRow.style.marginTop = "4px";
+    releaseRow.appendChild(document.createTextNode("공 릴리스 "));
+    releaseRow.appendChild(equipButton("−0.01", () => {
+      PITCH_RELEASE_NORM = Math.max(0.15, PITCH_RELEASE_NORM - 0.01);
+      updateEquipmentPanel();
+    }));
+    releaseRow.appendChild(equipButton("+0.01", () => {
+      PITCH_RELEASE_NORM = Math.min(0.85, PITCH_RELEASE_NORM + 0.01);
+      updateEquipmentPanel();
+    }));
+    equipEditor.appendChild(releaseRow);
+
+    const copyRow = document.createElement("div");
+    copyRow.appendChild(equipButton("설정 복사", copyEquipmentTransform));
+    equipEditor.appendChild(copyRow);
+
+    const equipPanel = document.createElement("div");
+    equipPanel.id = "equipmentCoordPanel";
+    equipPanel.style.marginTop = "5px";
+    equipPanel.style.padding = "5px";
+    equipPanel.style.background = "rgba(255,255,255,.08)";
+    equipPanel.style.borderRadius = "6px";
+    equipEditor.appendChild(equipPanel);
+
+    selectEquipment(state.bat || state.glove);
+  }
 
   // TEMP placement editor UI. This is intentionally button-driven as well as
   // mouse/keyboard-driven because Colab iframes can steal keyboard focus.
