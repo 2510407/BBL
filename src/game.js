@@ -27,7 +27,7 @@
   const BALL_HAND_OFFSET = new THREE.Vector3(-0.012, -0.176, 0.002);
 
   // TEMP: bat / glove transform editor.
-  const EQUIPMENT_EDIT_MODE = true;
+  const EQUIPMENT_EDIT_MODE = false;
 
   // TEMP: ball visual-size editor.
   const BALL_EDIT_MODE = false;
@@ -39,8 +39,9 @@
   const EQUIP_ROT_STEPS = [1, 5, 15];
   const EQUIP_SCALE_STEPS = [0.01, 0.05, 0.10];
 
-  const CALIBRATED_BAT_OFFSET = new THREE.Vector3(0.000, 0.000, 0.000);
+  const CALIBRATED_BAT_OFFSET = new THREE.Vector3(-0.370, 0.400, -0.120);
   const CALIBRATED_BAT_ROT = new THREE.Vector3(12.9, -60.0, 50.0);
+  const CALIBRATED_BAT_SCALE = 1.300;
 
   const CALIBRATED_GLOVE_OFFSET = new THREE.Vector3(-0.035, -0.160, 0.020);
   const CALIBRATED_GLOVE_ROT = new THREE.Vector3(55.0, -40.0, 35.0);
@@ -969,6 +970,12 @@
       );
       state.bat.userData.baseRotation = state.bat.rotation.clone();
       state.bat.userData.localAttachPosition = state.bat.position.clone();
+
+      if (Math.abs(CALIBRATED_BAT_SCALE - 1.0) > 0.00001) {
+        state.bat.scale.multiplyScalar(CALIBRATED_BAT_SCALE);
+      }
+      state.bat.userData.equipmentScale = CALIBRATED_BAT_SCALE;
+
       state.bat.updateMatrixWorld(true);
       console.log(
         "BAT attached:",
@@ -1138,7 +1145,12 @@
 
     const oldValue = obj.userData.equipmentScale || 1;
     if (Math.abs(oldValue) > 0.00001) obj.scale.multiplyScalar(1 / oldValue);
-    obj.userData.equipmentScale = 1.0;
+
+    const targetScale = obj === state.bat ? CALIBRATED_BAT_SCALE : 1.0;
+    if (Math.abs(targetScale - 1.0) > 0.00001) {
+      obj.scale.multiplyScalar(targetScale);
+    }
+    obj.userData.equipmentScale = targetScale;
     obj.updateMatrixWorld(true);
 
     updateEquipmentPanel();
