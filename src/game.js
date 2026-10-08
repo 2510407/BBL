@@ -24,22 +24,22 @@
   // The ball stays attached to the throwing hand until this normalized
   // animation time, then detaches from the exact hand world position.
   let PITCH_RELEASE_NORM = 0.38;
-  const BALL_HAND_OFFSET = new THREE.Vector3(0.038, -0.006, 0.012);
+  const BALL_HAND_OFFSET = new THREE.Vector3(-0.012, -0.176, 0.002);
 
   // TEMP: bat / glove transform editor.
-  const EQUIPMENT_EDIT_MODE = true;
+  const EQUIPMENT_EDIT_MODE = false;
 
   // TEMP: ball visual-size editor.
-  const BALL_EDIT_MODE = true;
+  const BALL_EDIT_MODE = false;
   const REAL_BALL_DIAMETER = 0.074; // 7.4 cm
-  let BALL_VISUAL_SCALE = 1.00;
+  let BALL_VISUAL_SCALE = 3.600;
   const BALL_SCALE_STEPS = [0.05, 0.10, 0.25];
 
   const EQUIP_MOVE_STEPS = [0.010, 0.050, 0.100];
   const EQUIP_ROT_STEPS = [1, 5, 15];
   const EQUIP_SCALE_STEPS = [0.01, 0.05, 0.10];
 
-  const CALIBRATED_BAT_OFFSET = new THREE.Vector3(-0.535, 0.455, -0.145);
+  const CALIBRATED_BAT_OFFSET = new THREE.Vector3(-0.535, 0.465, -0.145);
   const CALIBRATED_BAT_ROT = new THREE.Vector3(12.9, -60.0, 50.0);
 
   const CALIBRATED_GLOVE_OFFSET = new THREE.Vector3(-0.035, -0.160, 0.020);
@@ -1206,7 +1206,7 @@
   }
 
   function resetBallHandOffset() {
-    BALL_HAND_OFFSET.set(0.038, -0.006, 0.012);
+    BALL_HAND_OFFSET.set(-0.012, -0.176, 0.002);
     ensureBallAttachedForEditing();
     setBoneLocalOffsetInWorldUnits(
       state.ball,
